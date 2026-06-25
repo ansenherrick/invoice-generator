@@ -132,6 +132,23 @@ textarea {
   color: var(--text);
   border-radius: 8px;
   padding: 10px 14px;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.auth-toggle button:hover,
+.sidebar-nav button:hover,
+.sidebar-actions button:hover,
+.secondary-button:hover,
+.text-button:hover {
+  border-color: rgba(78, 125, 252, 0.35);
+  background: rgba(78, 125, 252, 0.06);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(26, 33, 52, 0.08);
 }
 
 .auth-toggle .active,
@@ -147,6 +164,42 @@ textarea {
   color: white;
   border-radius: 8px;
   padding: 12px 16px;
+  transition:
+    background-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.primary-button:hover {
+  background: #3f6ef0;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(78, 125, 252, 0.24);
+}
+
+.primary-button:focus-visible,
+.auth-toggle button:focus-visible,
+.sidebar-nav button:focus-visible,
+.sidebar-actions button:focus-visible,
+.secondary-button:focus-visible,
+.text-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(78, 125, 252, 0.18);
+}
+
+button:disabled,
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+  box-shadow: none;
+}
+
+button:disabled:hover,
+.primary-button:disabled:hover,
+.secondary-button:disabled:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .status-banner {
@@ -342,6 +395,11 @@ textarea {
   color: white;
 }
 
+.sidebar-action--new:hover {
+  background: #3f6ef0;
+  border-color: #3f6ef0;
+}
+
 .sidebar-action--logout {
   border-color: rgba(163, 25, 45, 0.35);
   color: #a3192d;
@@ -394,6 +452,26 @@ textarea {
   border-radius: 8px;
   padding: 12px 14px;
   background: var(--surface-alt);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.file-input:hover {
+  border-color: var(--accent);
+  background: rgba(78, 125, 252, 0.08);
+  box-shadow: 0 8px 20px rgba(78, 125, 252, 0.12);
+  transform: translateY(-1px);
+}
+
+.file-input:focus-within {
+  border-color: var(--accent);
+  background: rgba(78, 125, 252, 0.08);
+  box-shadow: 0 0 0 3px rgba(78, 125, 252, 0.16);
 }
 
 .file-input input {
