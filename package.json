@@ -1,0 +1,21 @@
+{
+  "name": "invoice-generator",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @invoice/shared\" \"npm run dev --workspace @invoice/api\" \"npm run dev --workspace @invoice/web\"",
+    "dev:api:devdata": "USE_DEV_DATA=true npm run dev --workspace @invoice/api",
+    "build": "npm run build --workspace @invoice/shared && npm run build --workspace @invoice/api && npm run build --workspace @invoice/web",
+    "build:vercel": "npm run build --workspace @invoice/shared && npm run build --workspace @invoice/web",
+    "start": "npm run start --workspace @invoice/api",
+    "db:setup": "psql postgresql://postgres:postgres@localhost:5432/invoice_generator -f apps/api/src/db/schema.sql"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "typescript": "^5.8.3"
+  }
+}
