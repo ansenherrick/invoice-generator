@@ -33,10 +33,19 @@
 ## Vercel setup
 
 1. Import this repo into Vercel
-2. Keep the root directory at the repo root
+2. Set the **Root Directory** to the repo root: `/`
 3. Vercel will use `vercel.json`
 4. Add the required environment variables
 5. Deploy
+
+## Important Vercel setting
+
+If Vercel is trying to run commands inside `apps/api`, your project root is set incorrectly.
+
+- Correct root: repo root `/`
+- Incorrect root: `apps/api`
+
+If the root is set to `apps/api`, Vercel will look for workspace-local scripts and fail to build the combined app correctly.
 
 ## Notes
 
