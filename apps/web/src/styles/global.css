@@ -54,7 +54,6 @@ img {
 
 .auth-card,
 .panel,
-.invoice-sheet,
 .sidebar {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -479,12 +478,16 @@ button:disabled:hover,
 }
 
 .invoice-sheet {
+  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   padding: 34px 38px;
-  min-height: 1040px;
   display: grid;
   gap: 20px;
   font-size: 0.92rem;
   line-height: 1.32;
+  align-content: start;
 }
 
 .invoice-sheet__hero,

@@ -9,9 +9,11 @@ export const exportElementToPdf = async (element, fileName) => {
             scale: 2,
             useCORS: true,
             backgroundColor: "#ffffff",
+            scrollX: 0,
+            scrollY: 0,
         },
         pagebreak: {
-            mode: ["css", "legacy"],
+            mode: ["css"],
             avoid: [".invoice-sheet__hero", ".invoice-sheet__title-group", ".invoice-sheet__signature", "tr"],
         },
         jsPDF: {

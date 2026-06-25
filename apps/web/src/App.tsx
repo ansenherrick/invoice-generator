@@ -281,18 +281,36 @@ const App = () => {
     setClientForm(emptyClientForm);
   };
 
-  const saveCurrentClientToLibrary = () => {
-    setClientForm({
-      id: "",
-      nickname: draft.client.name || draft.client.businessName || "",
-      name: draft.client.name,
-      businessName: draft.client.businessName ?? "",
-      email: draft.client.email ?? "",
-      addressLines: draft.client.addressLines.join("\n"),
-      notes: "",
-    });
-    setView("profile");
-    setMessage("We copied the current invoice client into the saved-client form.");
+  const saveCurrentClientToLibrary = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      const payload = {
+        nickname: draft.client.name || draft.client.businessName || "",
+        name: draft.client.name,
+        businessName: draft.client.businessName ?? "",
+        email: draft.client.email ?? "",
+        addressLines: draft.client.addressLines,
+        notes: "",
+      };
+
+      const existingClient = selectedClientId ? clients.find((client) => client.id === selectedClientId) : undefined;
+      const response = existingClient
+        ? await api.updateClient(existingClient.id, payload)
+        : await api.createClient(payload);
+
+      const refreshedClients = await api.listClients();
+      setClients(refreshedClients.clients);
+      setSelectedClientId(response.client.id);
+      populateClientForm(response.client);
+      setView("profile");
+      setMessage(existingClient ? "Saved client updated from the invoice." : "Current invoice client saved to your reusable library.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to save current client.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveClient = async () => {
@@ -922,7 +940,7 @@ const App = () => {
                     >
                       Load client
                     </button>
-                    <button className="secondary-button" onClick={saveCurrentClientToLibrary}>
+                    <button className="secondary-button" disabled={busy} onClick={() => void saveCurrentClientToLibrary()}>
                       Save current client
                     </button>
                   </div>
