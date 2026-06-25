@@ -37,6 +37,7 @@ export const createApp = () => {
   app.use("/api/invoices", invoicesRouter);
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+    console.error("Unhandled API error", error);
     response.status(500).json({
       error: error instanceof Error ? error.message : "Unexpected server error.",
     });

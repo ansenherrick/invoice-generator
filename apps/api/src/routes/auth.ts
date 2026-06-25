@@ -18,6 +18,10 @@ authRouter.post("/register", async (request, response) => {
     const result = await authService.register(email.trim().toLowerCase(), password);
     response.status(201).json(result);
   } catch (error) {
+    console.error("Auth register failed", {
+      email: typeof request.body?.email === "string" ? request.body.email : undefined,
+      error,
+    });
     response.status(400).json({
       error: error instanceof Error ? error.message : "Unable to register account.",
     });
@@ -38,6 +42,10 @@ authRouter.post("/login", async (request, response) => {
     const result = await authService.login(email.trim().toLowerCase(), password);
     response.json(result);
   } catch (error) {
+    console.error("Auth login failed", {
+      email: typeof request.body?.email === "string" ? request.body.email : undefined,
+      error,
+    });
     response.status(401).json({
       error: error instanceof Error ? error.message : "Unable to log in.",
     });
