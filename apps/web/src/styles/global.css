@@ -268,13 +268,17 @@ button:disabled:hover,
 
 .workspace-grid {
   grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel {
   padding: 22px;
   display: grid;
   gap: 18px;
+}
+
+.workspace-grid > .panel:not(.panel--full):not(.panel--form) {
+  align-self: stretch;
 }
 
 .panel--full,
@@ -349,7 +353,7 @@ button:disabled:hover,
   background: var(--surface-alt);
   padding: 14px;
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .saved-client-card__main {
@@ -366,6 +370,22 @@ button:disabled:hover,
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.saved-client-card__actions .secondary-button,
+.saved-client-card__actions .text-button {
+  padding: 8px 12px;
+  min-height: 40px;
+  font-size: 0.95rem;
+}
+
+.saved-client-card__actions .secondary-button {
+  min-width: 124px;
+}
+
+.saved-client-card__actions .text-button {
+  min-width: 88px;
 }
 
 .sidebar-nav {
