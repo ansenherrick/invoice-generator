@@ -578,8 +578,12 @@ const App = () => {
         </nav>
 
         <div className="sidebar-actions">
-          <button onClick={resetDraft}>New invoice</button>
-          <button onClick={logout}>Logout</button>
+          <button className="sidebar-action sidebar-action--new" onClick={resetDraft}>
+            New invoice
+          </button>
+          <button className="sidebar-action sidebar-action--logout" onClick={logout}>
+            Logout
+          </button>
         </div>
       </aside>
 
@@ -600,7 +604,7 @@ const App = () => {
               <p>Drafts stay editable, finalized invoices stay reusable, and your payment settings stay attached to your account.</p>
               <div className="stat-row">
                 <div>
-                  <strong>{summary.total.toFixed(2)}</strong>
+                  <strong>${summary.total.toFixed(2)}</strong>
                   <span>Current draft total</span>
                 </div>
                 <div>
