@@ -454,12 +454,22 @@ button:disabled:hover,
 .invoice-list__card {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 24px;
   text-align: left;
   padding: 16px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface-alt);
+}
+
+.invoice-list__card > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.invoice-list__card > div:last-child {
+  justify-items: end;
 }
 
 .file-input {

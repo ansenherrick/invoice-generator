@@ -213,12 +213,7 @@ const App = () => {
             ...current,
             client: {
                 ...current.client,
-                [field]: field === "addressLines"
-                    ? value
-                        .split("\n")
-                        .map((line) => line.trim())
-                        .filter(Boolean)
-                    : value,
+                [field]: field === "addressLines" ? value.split("\n") : value,
             },
         }));
     };
