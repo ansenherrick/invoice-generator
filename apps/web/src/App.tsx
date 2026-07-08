@@ -1166,7 +1166,7 @@ const App = () => {
                   <p className="micro-label">Previous Shifts</p>
                   <h3 className="panel-title">Recent completed entries</h3>
                 </div>
-                <button className="text-btn" type="button" onClick={() => setTimeSettingsOpen(true)}>
+                <button className="ghost-btn timekeeper-inline-btn" type="button" onClick={() => setTimeSettingsOpen(true)}>
                   Open Settings
                 </button>
               </div>
@@ -1199,7 +1199,7 @@ const App = () => {
                 <p className="micro-label">Account</p>
                 <h3>Settings and exports</h3>
               </div>
-              <button className="text-btn" type="button" onClick={() => setTimeSettingsOpen(false)}>
+              <button className="ghost-btn timekeeper-inline-btn" type="button" onClick={() => setTimeSettingsOpen(false)}>
                 Close
               </button>
             </div>
@@ -1272,7 +1272,7 @@ const App = () => {
                   <p className="muted-text">Select completed entries to export as CSV or `.invoice`, or send them straight into Invoice Generator.</p>
                 </div>
               </div>
-              <div className="stacked-actions">
+              <div className="stacked-actions export-stack">
                 <div className="button-pair">
                   <button className="secondary-btn" type="button" disabled={busy || selectedShiftIds.length === 0} onClick={() => void exportSelectedShifts("csv")}>
                     Export CSV
@@ -1285,7 +1285,7 @@ const App = () => {
                   Create invoice draft
                 </button>
               </div>
-              <div className="selection-list">
+              <div className="selection-list export-selection-list">
                 {completedShifts.length ? (
                   completedShifts.map((shift) => {
                     const selected = selectedShiftIds.includes(shift.id);
