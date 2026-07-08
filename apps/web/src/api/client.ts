@@ -1,4 +1,13 @@
-import type { InvoiceDraft, InvoiceStatus, ProfileData, SavedClient, StoredInvoice } from "@invoice/shared";
+import type {
+  InvoiceDraft,
+  InvoiceStatus,
+  ProfileData,
+  SavedClient,
+  ShiftExportFormat,
+  ShiftExportType,
+  ShiftRecord,
+  StoredInvoice,
+} from "@invoice/shared";
 
 const jsonHeaders = {
   "Content-Type": "application/json",
@@ -75,6 +84,10 @@ export const api = {
     return request<{ invoices: StoredInvoice[] }>("/api/invoices");
   },
 
+  listShifts() {
+    return request<{ shifts: ShiftRecord[] }>("/api/shifts");
+  },
+
   listClients() {
     return request<{ clients: SavedClient[] }>("/api/clients");
   },
@@ -109,6 +122,60 @@ export const api = {
   updateInvoice(invoiceId: string, payload: { status: InvoiceStatus; sourceFormat: string; data: InvoiceDraft }) {
     return request<{ invoice: StoredInvoice }>(`/api/invoices/${invoiceId}`, {
       method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  createManualShift(payload: { startAt: string; endAt: string; breakMinutes: number; notes: string }) {
+    return request<{ shifts: ShiftRecord[] }>("/api/shifts/manual", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  clockIn() {
+    return request<{ shifts: ShiftRecord[] }>("/api/shifts/clock-in", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  clockOut(shiftId: string, notes = "") {
+    return request<{ shifts: ShiftRecord[] }>(`/api/shifts/${shiftId}/clock-out`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    });
+  },
+
+  startBreak(shiftId: string, type: string) {
+    return request<{ shifts: ShiftRecord[] }>(`/api/shifts/${shiftId}/breaks`, {
+      method: "POST",
+      body: JSON.stringify({ type }),
+    });
+  },
+
+  endBreak(shiftId: string, breakId: string) {
+    return request<{ shifts: ShiftRecord[] }>(`/api/shifts/${shiftId}/breaks/${breakId}/end`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  exportShifts(payload: {
+    shiftIds: string[];
+    type: ShiftExportType;
+    format: ShiftExportFormat;
+    invoice?: Record<string, unknown>;
+  }) {
+    return request<{
+      content: string;
+      filename: string;
+      mimeType: string;
+      format: ShiftExportFormat;
+      exportedCount: number;
+      shifts: ShiftRecord[];
+    }>("/api/shifts/exports", {
+      method: "POST",
       body: JSON.stringify(payload),
     });
   },

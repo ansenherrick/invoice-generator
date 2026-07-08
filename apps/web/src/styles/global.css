@@ -212,6 +212,16 @@ button:disabled:hover,
   border: 1px solid rgba(163, 25, 45, 0.16);
 }
 
+.shift-inline-banner {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: rgba(255, 188, 66, 0.14);
+  border: 1px solid rgba(255, 188, 66, 0.28);
+  color: #7f5200;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(340px, 380px) minmax(0, 1fr);
@@ -451,6 +461,11 @@ button:disabled:hover,
   line-height: 1.35;
 }
 
+.stat-row--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 .invoice-list__card {
   display: flex;
   justify-content: space-between;
@@ -505,6 +520,85 @@ button:disabled:hover,
 
 .file-input input {
   display: none;
+}
+
+.shift-list {
+  display: grid;
+  gap: 12px;
+}
+
+.shift-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface-alt);
+}
+
+.shift-card--selected {
+  border-color: rgba(78, 125, 252, 0.5);
+  box-shadow: 0 10px 22px rgba(78, 125, 252, 0.12);
+}
+
+.shift-card__select input {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+}
+
+.shift-card__body,
+.shift-card__meta {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shift-card__meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  color: var(--text-soft);
+  font-size: 0.94rem;
+}
+
+.shift-break-list {
+  display: grid;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.shift-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  border: 1px solid var(--border);
+  background: #f5f7fb;
+  color: var(--text-soft);
+}
+
+.shift-status-pill--clocked-in {
+  background: rgba(78, 125, 252, 0.12);
+  color: var(--accent);
+  border-color: rgba(78, 125, 252, 0.28);
+}
+
+.shift-status-pill--on-break {
+  background: rgba(255, 188, 66, 0.18);
+  color: #9a6300;
+  border-color: rgba(255, 188, 66, 0.32);
+}
+
+.shift-status-pill--completed {
+  background: rgba(37, 180, 109, 0.12);
+  color: #0f7a43;
+  border-color: rgba(37, 180, 109, 0.28);
 }
 
 .invoice-sheet {
@@ -672,6 +766,10 @@ button:disabled:hover,
   }
 
   .stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .shift-card__meta {
     grid-template-columns: 1fr;
   }
 }

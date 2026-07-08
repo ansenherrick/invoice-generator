@@ -1,6 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createEmptyProfile, type InvoiceDraft, type InvoiceStatus, type ProfileData, type SavedClient, type StoredInvoice } from "@invoice/shared";
+import {
+  createEmptyProfile,
+  type InvoiceDraft,
+  type InvoiceStatus,
+  type ProfileData,
+  type SavedClient,
+  type ShiftExportFormat,
+  type ShiftExportType,
+  type ShiftRecord,
+  type StoredInvoice,
+} from "@invoice/shared";
 import { env } from "../config/env.js";
 
 type DevUser = {
@@ -15,6 +25,7 @@ type DevState = {
   profiles: Record<string, ProfileData>;
   invoices: StoredInvoice[];
   clients: SavedClient[];
+  shifts: ShiftRecord[];
 };
 
 const devDataPath = path.resolve(env.repoRoot, "apps/api/dev-data.json");
@@ -24,6 +35,7 @@ const createEmptyState = (): DevState => ({
   profiles: {},
   invoices: [],
   clients: [],
+  shifts: [],
 });
 
 const ensureStateFile = async () => {
@@ -224,5 +236,126 @@ export const devDataStore = {
     state.clients = nextClients;
     await writeState(state);
     return true;
+  },
+
+  async listShifts(userId: string) {
+    const state = await readState();
+    return [...state.shifts]
+      .filter((shift) => shift.userId === userId)
+      .sort((left, right) => right.clockInAt.localeCompare(left.clockInAt));
+  },
+
+  async findShiftById(shiftId: string, userId: string) {
+    const state = await readState();
+    return state.shifts.find((shift) => shift.id === shiftId && shift.userId === userId) ?? null;
+  },
+
+  async findActiveShift(userId: string) {
+    const state = await readState();
+    const shifts = [...state.shifts]
+      .filter((shift) => shift.userId === userId)
+      .sort((left, right) => right.clockInAt.localeCompare(left.clockInAt));
+    return shifts.find((shift) => !shift.clockOutAt) ?? null;
+  },
+
+  async createClockInShift(userId: string) {
+    const state = await readState();
+    const timestamp = new Date().toISOString();
+    const shift: ShiftRecord = {
+      id: crypto.randomUUID(),
+      userId,
+      clockInAt: timestamp,
+      clockOutAt: null,
+      notes: "",
+      createdAt: timestamp,
+      breaks: [],
+      exports: [],
+    };
+
+    state.shifts.unshift(shift);
+    await writeState(state);
+    return shift;
+  },
+
+  async createManualShift(userId: string, input: { startAt: string; endAt: string; breakMinutes: number; notes: string }) {
+    const state = await readState();
+    const shiftId = crypto.randomUUID();
+    const shift: ShiftRecord = {
+      id: shiftId,
+      userId,
+      clockInAt: input.startAt,
+      clockOutAt: input.endAt,
+      notes: input.notes,
+      createdAt: new Date().toISOString(),
+      breaks:
+        input.breakMinutes > 0
+          ? [
+              {
+                id: crypto.randomUUID(),
+                type: "Manual Break",
+                startAt: new Date(new Date(input.endAt).getTime() - input.breakMinutes * 60000).toISOString(),
+                endAt: input.endAt,
+              },
+            ]
+          : [],
+      exports: [],
+    };
+
+    state.shifts.unshift(shift);
+    await writeState(state);
+    return shift;
+  },
+
+  async updateShift(shiftId: string, userId: string, updater: (shift: ShiftRecord) => ShiftRecord | null) {
+    const state = await readState();
+    const index = state.shifts.findIndex((shift) => shift.id === shiftId && shift.userId === userId);
+    if (index === -1) {
+      return null;
+    }
+
+    const updated = updater(state.shifts[index]);
+    if (!updated) {
+      return null;
+    }
+
+    state.shifts[index] = updated;
+    await writeState(state);
+    return updated;
+  },
+
+  async recordShiftExport(
+    shiftIds: string[],
+    userId: string,
+    metadata: { batchId: string; exportedAt: string; type: ShiftExportType; format: ShiftExportFormat },
+  ) {
+    const state = await readState();
+    let count = 0;
+
+    state.shifts = state.shifts.map((shift) => {
+      if (shift.userId !== userId || !shiftIds.includes(shift.id)) {
+        return shift;
+      }
+
+      count += 1;
+      return {
+        ...shift,
+        exports: [
+          ...shift.exports,
+          {
+            id: crypto.randomUUID(),
+            batchId: metadata.batchId,
+            exportedAt: metadata.exportedAt,
+            type: metadata.type,
+            format: metadata.format,
+          },
+        ],
+      };
+    });
+
+    if (count > 0) {
+      await writeState(state);
+    }
+
+    return count;
   },
 };

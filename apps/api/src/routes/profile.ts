@@ -3,27 +3,28 @@ import type { ProfileData } from "@invoice/shared";
 import { getUserId, requireAuth } from "../middleware/auth.js";
 import { profileService } from "../services/profileService.js";
 import { storageService } from "../services/storageService.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import { logoUpload, signatureUpload } from "../utils/uploads.js";
 
 export const profileRouter = Router();
 
 profileRouter.use(requireAuth);
 
-profileRouter.get("/", async (request, response) => {
+profileRouter.get("/", asyncHandler(async (request, response) => {
   const profile = await profileService.get(getUserId(request));
   response.json({
     profile,
   });
-});
+}));
 
-profileRouter.put("/", async (request, response) => {
+profileRouter.put("/", asyncHandler(async (request, response) => {
   const profile = await profileService.update(getUserId(request), request.body as ProfileData);
   response.json({
     profile,
   });
-});
+}));
 
-profileRouter.post("/logo", logoUpload.single("file"), async (request, response) => {
+profileRouter.post("/logo", logoUpload.single("file"), asyncHandler(async (request, response) => {
   if (!request.file) {
     response.status(400).json({
       error: "No logo file received.",
@@ -42,9 +43,9 @@ profileRouter.post("/logo", logoUpload.single("file"), async (request, response)
   response.json({
     profile,
   });
-});
+}));
 
-profileRouter.post("/signature", signatureUpload.single("file"), async (request, response) => {
+profileRouter.post("/signature", signatureUpload.single("file"), asyncHandler(async (request, response) => {
   if (!request.file) {
     response.status(400).json({
       error: "No signature file received.",
@@ -63,4 +64,4 @@ profileRouter.post("/signature", signatureUpload.single("file"), async (request,
   response.json({
     profile,
   });
-});
+}));

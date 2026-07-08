@@ -7,6 +7,7 @@ import { clientsRouter } from "./routes/clients.js";
 import { healthRouter } from "./routes/health.js";
 import { invoicesRouter } from "./routes/invoices.js";
 import { profileRouter } from "./routes/profile.js";
+import { shiftsRouter } from "./routes/shifts.js";
 import { templatesRouter } from "./routes/templates.js";
 
 export const createApp = () => {
@@ -35,6 +36,7 @@ export const createApp = () => {
   app.use("/api/templates", templatesRouter);
   app.use("/api/profile", profileRouter);
   app.use("/api/invoices", invoicesRouter);
+  app.use("/api/shifts", shiftsRouter);
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     console.error("Unhandled API error", error);

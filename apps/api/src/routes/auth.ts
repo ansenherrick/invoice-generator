@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { getUserId, requireAuth } from "../middleware/auth.js";
 import { authService } from "../services/authService.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const authRouter = Router();
 
-authRouter.post("/register", async (request, response) => {
+authRouter.post("/register", asyncHandler(async (request, response) => {
   try {
     const { email, password } = request.body as { email?: string; password?: string };
 
@@ -26,9 +27,9 @@ authRouter.post("/register", async (request, response) => {
       error: error instanceof Error ? error.message : "Unable to register account.",
     });
   }
-});
+}));
 
-authRouter.post("/login", async (request, response) => {
+authRouter.post("/login", asyncHandler(async (request, response) => {
   try {
     const { email, password } = request.body as { email?: string; password?: string };
 
@@ -50,9 +51,9 @@ authRouter.post("/login", async (request, response) => {
       error: error instanceof Error ? error.message : "Unable to log in.",
     });
   }
-});
+}));
 
-authRouter.get("/me", requireAuth, async (request, response) => {
+authRouter.get("/me", requireAuth, asyncHandler(async (request, response) => {
   const user = await authService.getUserById(getUserId(request));
 
   if (!user) {
@@ -68,4 +69,4 @@ authRouter.get("/me", requireAuth, async (request, response) => {
       email: user.email,
     },
   });
-});
+}));

@@ -2,10 +2,22 @@
 
 ## Target architecture
 
+- one Vercel app
 - frontend: Vercel static hosting from `apps/web/dist`
-- backend: Express on Vercel via `api/index.ts`
+- backend: Express on Vercel via `api/index.js`
+- one Supabase project
 - database: Supabase Postgres
 - asset storage: Supabase Storage
+
+## Domain model inside the shared backend
+
+This deployment intentionally keeps invoice and time-tracker data separate.
+
+- shared infrastructure tables: `users`
+- invoice tables: `profiles`, `invoices`, `saved_clients`
+- tracker tables: `shifts`, `shift_breaks`, `shift_exports`
+
+The invoice module does not read tracker tables directly to create invoice drafts. Tracker-to-invoice handoff happens through the compact `.invoice` import/export format.
 
 ## Required environment variables
 
@@ -26,7 +38,7 @@
 
 1. Create a Supabase project
 2. Create a public bucket named `invoice-assets`
-3. Run the SQL schema from `apps/api/src/db/schema.sql`
+3. Run the SQL migration from `apps/api/supabase/migrations/20260706_000001_freelance_toolset_initial.sql`
 4. Copy the Postgres pooler connection string into `DATABASE_URL`
 5. Copy the project URL and service role key into the matching env vars
 
@@ -52,3 +64,4 @@ If the root is set to `apps/api`, Vercel will look for workspace-local scripts a
 - The frontend talks to `/api/*`, so same-origin deployment stays simple
 - Supabase Storage is used automatically when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present
 - Local file uploads remain available in development when Supabase env vars are absent
+- One database is used for both modules, but the business data remains separated by table family and route boundaries

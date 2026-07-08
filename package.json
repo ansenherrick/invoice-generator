@@ -12,7 +12,7 @@
     "build": "npm run build --workspace @invoice/shared && npm run build --workspace @invoice/api && npm run build --workspace @invoice/web",
     "build:vercel": "npm run build --workspace @invoice/shared && npm run build --workspace @invoice/api && npm run build --workspace @invoice/web",
     "start": "npm run start --workspace @invoice/api",
-    "db:setup": "psql postgresql://postgres:postgres@localhost:5432/invoice_generator -f apps/api/src/db/schema.sql"
+    "db:setup": "psql postgresql://postgres:postgres@localhost:5432/invoice_generator -f apps/api/supabase/migrations/20260706_000001_freelance_toolset_initial.sql"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

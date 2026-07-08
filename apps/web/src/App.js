@@ -1,6 +1,6 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useState } from "react";
-import { calculateInvoiceSummary, createEmptyInvoiceDraft, createEmptyProfile, decodeInvoicePayload, encodeInvoicePayload, exportCompactInvoice, parseInvoiceFile, } from "@invoice/shared";
+import { calculateInvoiceSummary, calculateShiftWorkedMinutes, createEmptyInvoiceDraft, createEmptyProfile, decodeInvoicePayload, encodeInvoicePayload, exportCompactInvoice, getShiftStatus, parseInvoiceFile, } from "@invoice/shared";
 import { api } from "./api/client";
 import { InvoicePreview } from "./components/InvoicePreview";
 import { exportElementToPdf } from "./utils/pdf";
@@ -12,6 +12,16 @@ const emptyClientForm = {
     email: "",
     addressLines: "",
     notes: "",
+};
+const createInitialManualShiftForm = () => {
+    const now = new Date();
+    const earlier = new Date(now.getTime() - 60 * 60000);
+    return {
+        startAt: toDateTimeInputValue(earlier),
+        endAt: toDateTimeInputValue(now),
+        breakMinutes: "0",
+        notes: "",
+    };
 };
 const saveToken = (token) => localStorage.setItem("invoice-token", token);
 const clearToken = () => localStorage.removeItem("invoice-token");
@@ -32,6 +42,24 @@ const withAssetOrigins = (profile) => profile
         signatureUrl: absoluteAssetUrl(profile.signatureUrl),
     }
     : null;
+const toDateTimeInputValue = (value) => {
+    const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+};
+const formatShiftDateTime = (value) => new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+}).format(new Date(value));
+const formatShiftHours = (shift) => (calculateShiftWorkedMinutes(shift) / 60).toFixed(2);
+const downloadTextFile = (content, filename, mimeType) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+};
 const App = () => {
     const [authMode, setAuthMode] = useState("register");
     const [email, setEmail] = useState("");
@@ -43,27 +71,37 @@ const App = () => {
     const [status, setStatus] = useState("draft");
     const [invoices, setInvoices] = useState([]);
     const [clients, setClients] = useState([]);
+    const [shifts, setShifts] = useState([]);
     const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
     const [selectedClientId, setSelectedClientId] = useState("");
+    const [selectedShiftIds, setSelectedShiftIds] = useState([]);
     const [view, setView] = useState("dashboard");
     const [templates, setTemplates] = useState([]);
     const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState("Set up your account and save reusable invoice settings.");
+    const [message, setMessage] = useState("Set up your freelance workspace, track time, and turn shifts into invoices.");
     const [error, setError] = useState("");
     const [clientForm, setClientForm] = useState(emptyClientForm);
+    const [manualShiftForm, setManualShiftForm] = useState(createInitialManualShiftForm);
+    const [activeShiftNotes, setActiveShiftNotes] = useState("");
     const resolvedProfile = useMemo(() => withAssetOrigins(profile), [profile]);
     const summary = useMemo(() => calculateInvoiceSummary(draft), [draft]);
+    const activeShift = useMemo(() => shifts.find((shift) => !shift.clockOutAt) ?? null, [shifts]);
+    const activeBreak = useMemo(() => activeShift?.breaks.find((entry) => !entry.endAt) ?? null, [activeShift]);
+    const completedShifts = useMemo(() => shifts.filter((shift) => shift.clockOutAt), [shifts]);
+    const trackedHours = useMemo(() => shifts.reduce((total, shift) => total + calculateShiftWorkedMinutes(shift) / 60, 0), [shifts]);
     const loadWorkspaceData = async () => {
-        const [clientResponse, profileResponse, invoiceResponse, templateResponse] = await Promise.all([
+        const [clientResponse, profileResponse, invoiceResponse, templateResponse, shiftResponse] = await Promise.all([
             api.listClients(),
             api.getProfile(),
             api.listInvoices(),
             api.getTemplates(),
+            api.listShifts(),
         ]);
         setClients(clientResponse.clients);
         setProfile(withAssetOrigins(profileResponse.profile));
         setInvoices(invoiceResponse.invoices);
         setTemplates(templateResponse.templates);
+        setShifts(shiftResponse.shifts);
     };
     useEffect(() => {
         const bootstrap = async () => {
@@ -458,19 +496,199 @@ const App = () => {
         setProfile(createEmptyProfile());
         setInvoices([]);
         setClients([]);
+        setShifts([]);
+        setSelectedShiftIds([]);
+        setActiveShiftNotes("");
+        setManualShiftForm(createInitialManualShiftForm());
         setSelectedClientId("");
         resetClientForm();
         resetDraft();
         setView("dashboard");
         setMessage("Signed out.");
     };
+    const toggleShiftSelection = (shiftId) => {
+        setSelectedShiftIds((current) => current.includes(shiftId) ? current.filter((id) => id !== shiftId) : [...current, shiftId]);
+    };
+    const handleClockIn = async () => {
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.clockIn();
+            setShifts(response.shifts);
+            setMessage("Shift started.");
+            setView("time");
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to clock in.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const handleClockOut = async () => {
+        if (!activeShift) {
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.clockOut(activeShift.id, activeShiftNotes);
+            setShifts(response.shifts);
+            setActiveShiftNotes("");
+            setMessage("Shift completed and saved.");
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to clock out.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const handleStartBreak = async (type) => {
+        if (!activeShift) {
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.startBreak(activeShift.id, type);
+            setShifts(response.shifts);
+            setMessage(`${type} started.`);
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to start break.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const handleEndBreak = async () => {
+        if (!activeShift || !activeBreak) {
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.endBreak(activeShift.id, activeBreak.id);
+            setShifts(response.shifts);
+            setMessage("Break ended.");
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to end break.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const handleManualShiftSave = async () => {
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.createManualShift({
+                startAt: manualShiftForm.startAt,
+                endAt: manualShiftForm.endAt,
+                breakMinutes: Number(manualShiftForm.breakMinutes || 0),
+                notes: manualShiftForm.notes,
+            });
+            setShifts(response.shifts);
+            setManualShiftForm(createInitialManualShiftForm());
+            setMessage("Manual shift saved.");
+            setView("time");
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to save manual shift.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const getShiftExportType = () => {
+        const selectedShifts = completedShifts.filter((shift) => selectedShiftIds.includes(shift.id));
+        return selectedShifts.some((shift) => shift.exports.length > 0) ? "re-export" : "initial-export";
+    };
+    const getShiftInvoiceOptions = () => {
+        const firstPricedItem = draft.items.find((item) => item.unitPrice > 0);
+        return {
+            invoiceNumber: draft.invoiceNumber || undefined,
+            issuedOn: draft.issueDate || undefined,
+            dueOn: draft.dueDate || undefined,
+            currency: draft.currency || undefined,
+            projectName: draft.projectName || undefined,
+            clientName: draft.client.name || undefined,
+            clientBusiness: draft.client.businessName || undefined,
+            clientEmail: draft.client.email || undefined,
+            clientAddress: draft.client.addressLines.join(";") || undefined,
+            notes: draft.notes || undefined,
+            hourlyRate: firstPricedItem?.unitPrice,
+            unitLabel: firstPricedItem?.unitLabel || undefined,
+        };
+    };
+    const createInvoiceFromSelectedShifts = async () => {
+        if (!selectedShiftIds.length) {
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.exportShifts({
+                shiftIds: selectedShiftIds,
+                type: getShiftExportType(),
+                format: "invoice",
+                invoice: getShiftInvoiceOptions(),
+            });
+            const importedDraft = parseInvoiceFile("tracked-shifts.invoice", response.content);
+            setDraft(importedDraft);
+            setShifts(response.shifts);
+            setSelectedInvoiceId(null);
+            setSourceFormat("time-tracker");
+            setStatus("draft");
+            setView("invoice");
+            setMessage("Selected shifts were handed off through the import format and loaded into the invoice builder.");
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to hand off shifts to the invoice builder.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const exportSelectedShifts = async (format) => {
+        if (!selectedShiftIds.length) {
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            const response = await api.exportShifts({
+                shiftIds: selectedShiftIds,
+                type: getShiftExportType(),
+                format,
+                invoice: getShiftInvoiceOptions(),
+            });
+            setShifts(response.shifts);
+            downloadTextFile(response.content, response.filename, response.mimeType);
+            setMessage(format === "invoice"
+                ? `Exported ${response.exportedCount} shift${response.exportedCount === 1 ? "" : "s"} as a compact .invoice file.`
+                : `Exported ${response.exportedCount} shift${response.exportedCount === 1 ? "" : "s"} as CSV.`);
+        }
+        catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : "Unable to export shifts.");
+        }
+        finally {
+            setBusy(false);
+        }
+    };
     if (!currentUser) {
-        return (_jsx("main", { className: "auth-shell", children: _jsxs("section", { className: "auth-card", children: [_jsx("p", { className: "eyebrow", children: "Freelance Invoice Generator" }), _jsx("h1", { children: "Minimal invoicing, reusable account settings, and draft saving." }), _jsx("p", { className: "support-copy", children: "Create one account, reuse your logo and payment info, and import work from CSV, JSON, or compact `.invoice` files." }), _jsxs("div", { className: "auth-toggle", children: [_jsx("button", { className: authMode === "register" ? "active" : "", onClick: () => setAuthMode("register"), children: "Register" }), _jsx("button", { className: authMode === "login" ? "active" : "", onClick: () => setAuthMode("login"), children: "Login" })] }), _jsxs("label", { children: ["Email", _jsx("input", { value: email, onChange: (event) => setEmail(event.target.value), placeholder: "you@example.com" })] }), _jsxs("label", { children: ["Password", _jsx("input", { type: "password", value: password, onChange: (event) => setPassword(event.target.value), placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" })] }), error ? _jsx("div", { className: "status-banner status-banner--error", children: error }) : null, _jsx("button", { className: "primary-button", disabled: busy, onClick: handleAuth, children: busy ? "Working..." : authMode === "register" ? "Create account" : "Log in" })] }) }));
+        return (_jsx("main", { className: "auth-shell", children: _jsxs("section", { className: "auth-card", children: [_jsx("p", { className: "eyebrow", children: "Freelance Invoice Generator" }), _jsx("h1", { children: "Minimal invoicing, reusable account settings, and draft saving." }), _jsx("p", { className: "support-copy", children: "Create one account, track shifts, reuse payment settings, and turn recorded work into invoices." }), _jsxs("div", { className: "auth-toggle", children: [_jsx("button", { className: authMode === "register" ? "active" : "", onClick: () => setAuthMode("register"), children: "Register" }), _jsx("button", { className: authMode === "login" ? "active" : "", onClick: () => setAuthMode("login"), children: "Login" })] }), _jsxs("label", { children: ["Email", _jsx("input", { value: email, onChange: (event) => setEmail(event.target.value), placeholder: "you@example.com" })] }), _jsxs("label", { children: ["Password", _jsx("input", { type: "password", value: password, onChange: (event) => setPassword(event.target.value), placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" })] }), error ? _jsx("div", { className: "status-banner status-banner--error", children: error }) : null, _jsx("button", { className: "primary-button", disabled: busy, onClick: handleAuth, children: busy ? "Working..." : authMode === "register" ? "Create account" : "Log in" })] }) }));
     }
-    return (_jsxs("div", { className: "app-shell", children: [_jsxs("aside", { className: "sidebar", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Invoice Studio" }), _jsx("h2", { children: currentUser.email })] }), _jsxs("nav", { className: "sidebar-nav", children: [_jsx("button", { className: view === "dashboard" ? "active" : "", onClick: () => setView("dashboard"), children: "Dashboard" }), _jsx("button", { className: view === "invoice" ? "active" : "", onClick: () => setView("invoice"), children: "Invoice Builder" }), _jsx("button", { className: view === "profile" ? "active" : "", onClick: () => setView("profile"), children: "Profile" })] }), _jsxs("div", { className: "sidebar-actions", children: [_jsx("button", { className: "sidebar-action sidebar-action--new", onClick: resetDraft, children: "New invoice" }), _jsx("button", { className: "sidebar-action sidebar-action--logout", onClick: logout, children: "Logout" })] })] }), _jsxs("main", { className: "main-shell", children: [_jsxs("header", { className: "topbar", children: [_jsxs("div", { children: [_jsx("h1", { children: view === "dashboard" ? "Dashboard" : view === "profile" ? "Profile" : "Invoice Builder" }), _jsx("p", { children: message })] }), error ? _jsx("div", { className: "status-banner status-banner--error", children: error }) : null] }), view === "dashboard" ? (_jsxs("section", { className: "dashboard-grid", children: [_jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Workspace" }), _jsxs("h3", { children: [invoices.length, " saved invoice", invoices.length === 1 ? "" : "s"] }), _jsx("p", { children: "Drafts stay editable, finalized invoices stay reusable, and your payment settings stay attached to your account." }), _jsxs("div", { className: "stat-row", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["$", summary.total.toFixed(2)] }), _jsx("span", { children: "Current draft total" })] }), _jsxs("div", { children: [_jsx("strong", { children: templates.length }), _jsx("span", { children: "Template ready" })] }), _jsxs("div", { children: [_jsx("strong", { children: clients.length }), _jsx("span", { children: "Saved clients" })] })] })] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Import" }), _jsx("h3", { children: "Bring in work from Clock Keeper" }), _jsx("p", { children: "Clock Keeper can export `.invoice`, CSV, or JSON. Upload here, review, then save or export." }), _jsxs("label", { className: "file-input", children: ["Import file", _jsx("input", { type: "file", accept: ".invoice,.csv,.json", onChange: (event) => void importInvoiceFile(event.target.files?.[0]) })] }), _jsx("button", { className: "secondary-button", onClick: downloadInvoiceFormat, children: "Download current `.invoice`" }), _jsx("button", { className: "secondary-button", onClick: () => void copyClockKeeperLink(), children: "Copy import link" })] }), _jsxs("article", { className: "panel panel--full", children: [_jsx("span", { className: "section-kicker", children: "Saved Invoices" }), _jsx("div", { className: "invoice-list", children: invoices.length ? (invoices.map((invoice) => {
+    return (_jsxs("div", { className: "app-shell", children: [_jsxs("aside", { className: "sidebar", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Invoice Studio" }), _jsx("h2", { children: currentUser.email })] }), _jsxs("nav", { className: "sidebar-nav", children: [_jsx("button", { className: view === "dashboard" ? "active" : "", onClick: () => setView("dashboard"), children: "Dashboard" }), _jsx("button", { className: view === "time" ? "active" : "", onClick: () => setView("time"), children: "Time Tracker" }), _jsx("button", { className: view === "invoice" ? "active" : "", onClick: () => setView("invoice"), children: "Invoice Builder" }), _jsx("button", { className: view === "profile" ? "active" : "", onClick: () => setView("profile"), children: "Profile" })] }), _jsxs("div", { className: "sidebar-actions", children: [_jsx("button", { className: "sidebar-action sidebar-action--new", onClick: resetDraft, children: "New invoice" }), _jsx("button", { className: "sidebar-action", disabled: busy, onClick: () => void handleClockIn(), children: "Clock in" }), _jsx("button", { className: "sidebar-action sidebar-action--logout", onClick: logout, children: "Logout" })] })] }), _jsxs("main", { className: "main-shell", children: [_jsxs("header", { className: "topbar", children: [_jsxs("div", { children: [_jsx("h1", { children: view === "dashboard" ? "Dashboard" : view === "profile" ? "Profile" : view === "time" ? "Time Tracker" : "Invoice Builder" }), _jsx("p", { children: message })] }), error ? _jsx("div", { className: "status-banner status-banner--error", children: error }) : null] }), view === "dashboard" ? (_jsxs("section", { className: "dashboard-grid", children: [_jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Workspace" }), _jsxs("h3", { children: [invoices.length, " saved invoice", invoices.length === 1 ? "" : "s"] }), _jsx("p", { children: "Drafts stay editable, finalized invoices stay reusable, and your payment settings stay attached to your account." }), _jsxs("div", { className: "stat-row", children: [_jsxs("div", { children: [_jsxs("strong", { children: ["$", summary.total.toFixed(2)] }), _jsx("span", { children: "Current draft total" })] }), _jsxs("div", { children: [_jsx("strong", { children: trackedHours.toFixed(2) }), _jsx("span", { children: "Tracked hours" })] }), _jsxs("div", { children: [_jsx("strong", { children: clients.length }), _jsx("span", { children: "Saved clients" })] })] })] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Import" }), _jsx("h3", { children: "Bring in outside invoice data" }), _jsx("p", { children: "Import `.invoice`, CSV, or JSON files, or build new invoice drafts directly from tracked shifts in the Time Tracker." }), _jsxs("label", { className: "file-input", children: ["Import file", _jsx("input", { type: "file", accept: ".invoice,.csv,.json", onChange: (event) => void importInvoiceFile(event.target.files?.[0]) })] }), _jsx("button", { className: "secondary-button", onClick: downloadInvoiceFormat, children: "Download current `.invoice`" }), _jsx("button", { className: "secondary-button", onClick: () => void copyClockKeeperLink(), children: "Copy import link" })] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Time Tracker" }), _jsxs("h3", { children: [completedShifts.length, " completed shift", completedShifts.length === 1 ? "" : "s"] }), _jsx("p", { children: "Clock live work, add manual entries, then send selected shifts straight into the invoice builder." }), _jsxs("div", { className: "stat-row stat-row--compact", children: [_jsxs("div", { children: [_jsx("strong", { children: activeShift ? "Live" : "Idle" }), _jsx("span", { children: "Current tracker status" })] }), _jsxs("div", { children: [_jsx("strong", { children: shifts.length }), _jsx("span", { children: "Total shifts" })] })] }), _jsx("button", { className: "secondary-button", onClick: () => setView("time"), children: "Open time tracker" })] }), _jsxs("article", { className: "panel panel--full", children: [_jsx("span", { className: "section-kicker", children: "Saved Invoices" }), _jsx("div", { className: "invoice-list", children: invoices.length ? (invoices.map((invoice) => {
                                             const invoiceSummary = calculateInvoiceSummary(invoice.data);
                                             return (_jsxs("button", { className: "invoice-list__card", onClick: () => selectInvoice(invoice), children: [_jsxs("div", { children: [_jsx("strong", { children: invoice.data.invoiceNumber }), _jsx("span", { children: invoice.data.client.name || "No client yet" })] }), _jsxs("div", { children: [_jsx("span", { children: invoice.status }), _jsxs("strong", { children: ["$", invoiceSummary.total.toFixed(2)] })] })] }, invoice.id));
-                                        })) : (_jsx("p", { children: "No invoices yet. Create one or import from Clock Keeper." })) })] })] })) : null, view === "profile" && profile ? (_jsxs("section", { className: "workspace-grid", children: [_jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Business Identity" }), _jsxs("label", { children: ["Display Name", _jsx("input", { value: profile.displayName, onChange: (event) => handleProfileField("displayName", event.target.value) })] }), _jsxs("label", { children: ["Business Name", _jsx("input", { value: profile.businessName, onChange: (event) => handleProfileField("businessName", event.target.value) })] }), _jsxs("label", { children: ["Business Email", _jsx("input", { value: profile.email, onChange: (event) => handleProfileField("email", event.target.value) })] }), _jsxs("label", { children: ["Address", _jsx("textarea", { rows: 4, value: profile.addressLines.join("\n"), onChange: (event) => updateProfileAddress(event.target.value) })] }), _jsxs("div", { className: "file-row", children: [_jsxs("label", { className: "file-input", children: ["Upload logo", _jsx("input", { type: "file", accept: "image/*", onChange: (event) => void uploadAsset("logo", event.target.files?.[0]) })] }), _jsxs("label", { className: "file-input", children: ["Upload signature", _jsx("input", { type: "file", accept: "image/*", onChange: (event) => void uploadAsset("signature", event.target.files?.[0]) })] })] })] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Payment Details" }), _jsxs("label", { children: ["Primary Payment Label", _jsx("input", { value: profile.paymentPrimary.label, onChange: (event) => setProfile((current) => current
+                                        })) : (_jsx("p", { children: "No invoices yet. Create one or import from Clock Keeper." })) })] })] })) : null, view === "time" ? (_jsxs("section", { className: "workspace-grid", children: [_jsxs("article", { className: "panel", children: [_jsxs("div", { className: "section-row", children: [_jsxs("div", { children: [_jsx("span", { className: "section-kicker", children: "Shift Controls" }), _jsx("h3", { children: activeShift ? "Active shift running" : "No active shift" })] }), _jsx("span", { className: `shift-status-pill shift-status-pill--${activeShift ? getShiftStatus(activeShift) : "completed"}`, children: activeShift ? getShiftStatus(activeShift).replace("-", " ") : "idle" })] }), activeShift ? (_jsxs(_Fragment, { children: [_jsxs("p", { children: ["Started ", formatShiftDateTime(activeShift.clockInAt), "."] }), activeBreak ? (_jsxs("div", { className: "status-banner shift-inline-banner", children: [_jsx("strong", { children: activeBreak.type }), _jsxs("span", { children: ["Started ", formatShiftDateTime(activeBreak.startAt)] })] })) : null, _jsxs("label", { children: ["Shift notes", _jsx("textarea", { rows: 3, value: activeShiftNotes, onChange: (event) => setActiveShiftNotes(event.target.value), placeholder: "Optional notes for this completed shift" })] }), _jsxs("div", { className: "action-row", children: [activeBreak ? (_jsx("button", { className: "secondary-button", disabled: busy, onClick: () => void handleEndBreak(), children: "End break" })) : (_jsxs(_Fragment, { children: [_jsx("button", { className: "secondary-button", disabled: busy, onClick: () => void handleStartBreak("Short Break"), children: "Short break" }), _jsx("button", { className: "secondary-button", disabled: busy, onClick: () => void handleStartBreak("Lunch"), children: "Lunch" })] })), _jsx("button", { className: "primary-button", disabled: busy, onClick: () => void handleClockOut(), children: "Clock out" })] })] })) : (_jsx("div", { className: "action-row", children: _jsx("button", { className: "primary-button", disabled: busy, onClick: () => void handleClockIn(), children: "Clock in now" }) }))] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Manual Entry" }), _jsx("h3", { children: "Add past work" }), _jsxs("div", { className: "form-grid", children: [_jsxs("label", { children: ["Start", _jsx("input", { type: "datetime-local", value: manualShiftForm.startAt, onChange: (event) => setManualShiftForm((current) => ({ ...current, startAt: event.target.value })) })] }), _jsxs("label", { children: ["End", _jsx("input", { type: "datetime-local", value: manualShiftForm.endAt, onChange: (event) => setManualShiftForm((current) => ({ ...current, endAt: event.target.value })) })] }), _jsxs("label", { children: ["Break Minutes", _jsx("input", { type: "number", min: "0", value: manualShiftForm.breakMinutes, onChange: (event) => setManualShiftForm((current) => ({ ...current, breakMinutes: event.target.value })) })] }), _jsxs("label", { children: ["Notes", _jsx("input", { value: manualShiftForm.notes, onChange: (event) => setManualShiftForm((current) => ({ ...current, notes: event.target.value })), placeholder: "Homepage revisions" })] })] }), _jsx("button", { className: "secondary-button", disabled: busy, onClick: () => void handleManualShiftSave(), children: "Save manual shift" })] }), _jsxs("article", { className: "panel panel--full", children: [_jsxs("div", { className: "section-row", children: [_jsxs("div", { children: [_jsx("span", { className: "section-kicker", children: "Tracked Shifts" }), _jsx("h3", { children: "Select completed shifts to invoice" })] }), _jsxs("div", { className: "inline-actions", children: [_jsx("button", { className: "secondary-button", disabled: busy || selectedShiftIds.length === 0, onClick: () => void exportSelectedShifts("csv"), children: "Export CSV" }), _jsx("button", { className: "secondary-button", disabled: busy || selectedShiftIds.length === 0, onClick: () => void exportSelectedShifts("invoice"), children: "Export `.invoice`" }), _jsx("button", { className: "primary-button", disabled: busy || selectedShiftIds.length === 0, onClick: () => void createInvoiceFromSelectedShifts(), children: "Create invoice draft" })] })] }), _jsx("div", { className: "shift-list", children: shifts.length ? (shifts.map((shift) => {
+                                            const isCompleted = Boolean(shift.clockOutAt);
+                                            const selected = selectedShiftIds.includes(shift.id);
+                                            return (_jsxs("label", { className: `shift-card ${selected ? "shift-card--selected" : ""}`, children: [_jsx("div", { className: "shift-card__select", children: _jsx("input", { type: "checkbox", checked: selected, disabled: !isCompleted, onChange: () => toggleShiftSelection(shift.id) }) }), _jsxs("div", { className: "shift-card__body", children: [_jsxs("div", { className: "section-row", children: [_jsx("strong", { children: shift.notes || "Tracked shift" }), _jsx("span", { className: `shift-status-pill shift-status-pill--${getShiftStatus(shift)}`, children: getShiftStatus(shift).replace("-", " ") })] }), _jsxs("div", { className: "shift-card__meta", children: [_jsx("span", { children: formatShiftDateTime(shift.clockInAt) }), _jsx("span", { children: shift.clockOutAt ? formatShiftDateTime(shift.clockOutAt) : "Still running" }), _jsxs("span", { children: [formatShiftHours(shift), " hours"] })] }), shift.breaks.length ? (_jsx("div", { className: "shift-break-list", children: shift.breaks.map((entry) => (_jsxs("span", { children: [entry.type, ": ", formatShiftDateTime(entry.startAt), entry.endAt ? ` to ${formatShiftDateTime(entry.endAt)}` : " to active"] }, entry.id))) })) : null] })] }, shift.id));
+                                        })) : (_jsx("p", { children: "No shifts yet. Clock in or add a manual entry to start building the merged workspace." })) })] })] })) : null, view === "profile" && profile ? (_jsxs("section", { className: "workspace-grid", children: [_jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Business Identity" }), _jsxs("label", { children: ["Display Name", _jsx("input", { value: profile.displayName, onChange: (event) => handleProfileField("displayName", event.target.value) })] }), _jsxs("label", { children: ["Business Name", _jsx("input", { value: profile.businessName, onChange: (event) => handleProfileField("businessName", event.target.value) })] }), _jsxs("label", { children: ["Business Email", _jsx("input", { value: profile.email, onChange: (event) => handleProfileField("email", event.target.value) })] }), _jsxs("label", { children: ["Address", _jsx("textarea", { rows: 4, value: profile.addressLines.join("\n"), onChange: (event) => updateProfileAddress(event.target.value) })] }), _jsxs("div", { className: "file-row", children: [_jsxs("label", { className: "file-input", children: ["Upload logo", _jsx("input", { type: "file", accept: "image/*", onChange: (event) => void uploadAsset("logo", event.target.files?.[0]) })] }), _jsxs("label", { className: "file-input", children: ["Upload signature", _jsx("input", { type: "file", accept: "image/*", onChange: (event) => void uploadAsset("signature", event.target.files?.[0]) })] })] })] }), _jsxs("article", { className: "panel", children: [_jsx("span", { className: "section-kicker", children: "Payment Details" }), _jsxs("label", { children: ["Primary Payment Label", _jsx("input", { value: profile.paymentPrimary.label, onChange: (event) => setProfile((current) => current
                                                     ? {
                                                         ...current,
                                                         paymentPrimary: {

@@ -87,7 +87,10 @@ export const InvoicePreview = ({ draft, profile }: InvoicePreviewProps) => {
                 {item.date ? <div>{item.date}</div> : null}
               </td>
               <td>{formatter.format(item.unitPrice)}</td>
-              <td>{item.quantity}</td>
+              <td>
+                {item.quantity}
+                {item.unitLabel ? ` ${item.unitLabel}` : ""}
+              </td>
               <td>{formatter.format(item.quantity * item.unitPrice)}</td>
             </tr>
           ))}

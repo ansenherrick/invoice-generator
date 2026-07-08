@@ -58,6 +58,9 @@ export const api = {
     listInvoices() {
         return request("/api/invoices");
     },
+    listShifts() {
+        return request("/api/shifts");
+    },
     listClients() {
         return request("/api/clients");
     },
@@ -87,6 +90,42 @@ export const api = {
     updateInvoice(invoiceId, payload) {
         return request(`/api/invoices/${invoiceId}`, {
             method: "PUT",
+            body: JSON.stringify(payload),
+        });
+    },
+    createManualShift(payload) {
+        return request("/api/shifts/manual", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+    },
+    clockIn() {
+        return request("/api/shifts/clock-in", {
+            method: "POST",
+            body: JSON.stringify({}),
+        });
+    },
+    clockOut(shiftId, notes = "") {
+        return request(`/api/shifts/${shiftId}/clock-out`, {
+            method: "POST",
+            body: JSON.stringify({ notes }),
+        });
+    },
+    startBreak(shiftId, type) {
+        return request(`/api/shifts/${shiftId}/breaks`, {
+            method: "POST",
+            body: JSON.stringify({ type }),
+        });
+    },
+    endBreak(shiftId, breakId) {
+        return request(`/api/shifts/${shiftId}/breaks/${breakId}/end`, {
+            method: "POST",
+            body: JSON.stringify({}),
+        });
+    },
+    exportShifts(payload) {
+        return request("/api/shifts/exports", {
+            method: "POST",
             body: JSON.stringify(payload),
         });
     },

@@ -88,3 +88,51 @@ export type InvoiceTemplateDefinition = {
   name: string;
   description: string;
 };
+
+export type ShiftExportFormat = "csv" | "invoice";
+
+export type ShiftExportType = "initial-export" | "re-export";
+
+export type ShiftStatus = "clocked-in" | "on-break" | "completed";
+
+export type ShiftBreak = {
+  id: string;
+  type: string;
+  startAt: string;
+  endAt?: string | null;
+};
+
+export type ShiftExportRecord = {
+  id: string;
+  batchId: string;
+  exportedAt: string;
+  type: ShiftExportType;
+  format: ShiftExportFormat;
+};
+
+export type ShiftRecord = {
+  id: string;
+  userId: string;
+  clockInAt: string;
+  clockOutAt?: string | null;
+  notes: string;
+  createdAt: string;
+  breaks: ShiftBreak[];
+  exports: ShiftExportRecord[];
+};
+
+export type ShiftInvoiceOptions = {
+  invoiceNumber?: string;
+  issuedOn?: string;
+  dueOn?: string;
+  dueInDays?: number;
+  currency?: string;
+  projectName?: string;
+  clientName?: string;
+  clientBusiness?: string;
+  clientEmail?: string;
+  clientAddress?: string;
+  notes?: string;
+  hourlyRate?: number;
+  unitLabel?: string;
+};

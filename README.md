@@ -1,12 +1,17 @@
-# Invoice Generator
+# Freelance Toolset
 
-A local-first, modular freelance invoicing app built as a single repo with:
+A combined freelance toolset built as one repo, one deployable Vercel app, and one Supabase-backed backend with separate product domains inside it:
 
 - `apps/web`: React + Vite frontend
 - `apps/api`: Express + PostgreSQL backend
-- `packages/shared`: shared invoice types, totals logic, template registry, and import/export parsers
+- `packages/shared`: shared invoice types, time-tracking types, totals logic, template registry, and import/export parsers
 
-The first template is based on the attached minimalist invoice reference and is structured so additional templates can be added later without rewriting the editor or storage model.
+The merged app currently contains two modules:
+
+- `Invoice Builder`: profiles, clients, draft/finalized invoices, PDF export
+- `Time Tracker`: shift tracking, manual entries, break tracking, shift exports
+
+These modules share authentication and deployment infrastructure, but they do not share business tables. Tracker data stays in tracker tables, invoice data stays in invoice tables, and the handoff between them uses the compact `.invoice` import/export contract rather than direct invoice reads from tracker records.
 
 ## Included features
 
@@ -15,12 +20,14 @@ The first template is based on the attached minimalist invoice reference and is 
 - Logo upload and signature upload
 - Saved primary and secondary payment methods
 - Reusable saved clients with load/edit/delete support
+- Time tracking with live shifts, manual shifts, and break tracking
+- Shift export to CSV and compact `.invoice`
 - Draft invoice saving and re-opening
 - Finalized invoice saving
 - Direct PDF export from the invoice preview
 - Import from `.csv`, `.json`, and compact `.invoice`
-- Export to compact `.invoice` for Clock Keeper handoff
-- Copy direct Clock Keeper import links
+- Internal tracker-to-invoice handoff through compact `.invoice`
+- Copy direct compact-import links
 - Template registry with a first `modern-minimal` template
 
 ## Local setup
@@ -64,10 +71,15 @@ This writes local test data to `apps/api/dev-data.json`, so registration, login,
 
 ## Architecture notes
 
+- This repo is intended to deploy as one Vercel app and use one Supabase project.
+- Authentication is shared at the app level through the `users` table.
+- Invoice data and tracker data are kept separate in different table families inside the same Postgres database.
+- The invoice module does not query tracker tables to create invoices. It consumes the same compact `.invoice` handoff format used by external integrations.
 - User profile data is stored as JSONB in Postgres so future invoice fields and templates can evolve without an early migration burden.
 - Invoice drafts and finalized invoices are also stored as JSONB, with `status`, `template_id`, and `source_format` indexed separately for flexibility.
+- Time tracker shifts, breaks, and exports live in their own tracker tables.
 - Uploads use a storage abstraction boundary. Locally they are written to `uploads/`, and when Supabase env vars are present they are pushed to Supabase Storage.
-- The frontend imports shared parsing logic from `packages/shared`, so Clock Keeper and this app can use the same `.invoice` contract if you want.
+- The frontend imports shared parsing logic from `packages/shared`, so the internal tracker and any external tool can use the same `.invoice` contract.
 
 ## Supabase storage note
 
@@ -78,10 +90,10 @@ For logos and signatures, Supabase Storage usage is typically small if we keep f
 
 That means storage cost should stay low for this use case, especially if we add file-size limits and optionally compress uploads later.
 
-## Suggested next build steps
+## Key docs
 
-1. Add richer template switching and template-specific renderers
-2. Add customer-specific tax and currency defaults
-3. Add signed private asset URLs if you want non-public storage
-4. Add direct import session API if Clock Keeper payloads outgrow URL transfer
-5. Add automated deployment checks
+- [Deployment guide](./docs/deployment.md)
+- [Architecture and domain separation](./docs/architecture.md)
+- [Supabase + Vercel checklist](./docs/supabase-vercel-checklist.md)
+- [Compact `.invoice` format](./docs/invoice-format.md)
+- [Tracker/invoice handoff](./docs/clock-keeper-integration.md)

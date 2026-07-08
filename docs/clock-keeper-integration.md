@@ -1,10 +1,24 @@
-# Clock Keeper integration
+# Tracker To Invoice Handoff
 
-The invoice app supports two integration styles with Clock Keeper.
+This repo uses one handoff contract between the time-tracker module and the invoice module: compact `.invoice` import/export payloads.
+
+That same contract can also be used by an external tracker such as the older Clock Keeper app.
+
+## Internal app behavior
+
+Inside this merged app, the time tracker does **not** pass raw shift records into the invoice module.
+
+Instead it:
+
+1. builds a compact `.invoice` payload from selected completed shifts
+2. hands that payload to the invoice import flow
+3. lets the invoice module parse it the same way it parses external imports
+
+This keeps tracker data and invoice data separate even though they run in one Vercel app and one Supabase project.
 
 ## Option 1: direct web handoff
 
-Best for an `Export to Invoice App` button.
+Best for an external tracker with an `Export to Invoice App` button.
 
 1. Build the compact `.invoice` plaintext payload in Clock Keeper
 2. Base64url-encode it
@@ -14,16 +28,16 @@ Best for an `Export to Invoice App` button.
 https://your-invoice-app.vercel.app/?import=<URL_SAFE_BASE64_PAYLOAD>
 ```
 
-The invoice app stores that payload locally if the user is not logged in yet, then imports it automatically after login.
+The app stores that payload locally if the user is not logged in yet, then imports it automatically after login.
 
 ## Option 2: file export
 
-Best for a simpler first pass.
+Best for a simpler external integration.
 
 1. Export a `.invoice` file from Clock Keeper
 2. Upload it in the invoice app
 
-## Recommended Clock Keeper implementation
+## Recommended external tracker implementation
 
 Use the same compact contract from `docs/invoice-format.md`.
 

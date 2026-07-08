@@ -1,23 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   calculateInvoiceSummary,
+  calculateShiftWorkedMinutes,
   createEmptyInvoiceDraft,
   createEmptyProfile,
   decodeInvoicePayload,
   encodeInvoicePayload,
   exportCompactInvoice,
+  getShiftStatus,
   parseInvoiceFile,
   type InvoiceDraft,
   type InvoiceStatus,
   type ProfileData,
   type SavedClient,
+  type ShiftBreak,
+  type ShiftExportFormat,
+  type ShiftExportType,
+  type ShiftRecord,
+  type ShiftInvoiceOptions,
   type StoredInvoice,
 } from "@invoice/shared";
 import { api } from "./api/client";
 import { InvoicePreview } from "./components/InvoicePreview";
 import { exportElementToPdf } from "./utils/pdf";
 
-type View = "dashboard" | "invoice" | "profile";
+type View = "dashboard" | "invoice" | "profile" | "time";
 
 const emptyClientForm = {
   id: "",
@@ -27,6 +34,17 @@ const emptyClientForm = {
   email: "",
   addressLines: "",
   notes: "",
+};
+
+const createInitialManualShiftForm = () => {
+  const now = new Date();
+  const earlier = new Date(now.getTime() - 60 * 60000);
+  return {
+    startAt: toDateTimeInputValue(earlier),
+    endAt: toDateTimeInputValue(now),
+    breakMinutes: "0",
+    notes: "",
+  };
 };
 
 const saveToken = (token: string) => localStorage.setItem("invoice-token", token);
@@ -54,6 +72,29 @@ const withAssetOrigins = (profile: ProfileData | null) =>
       }
     : null;
 
+const toDateTimeInputValue = (value: Date) => {
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+const formatShiftDateTime = (value: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+
+const formatShiftHours = (shift: ShiftRecord) => (calculateShiftWorkedMinutes(shift) / 60).toFixed(2);
+
+const downloadTextFile = (content: string, filename: string, mimeType: string) => {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
 const App = () => {
   const [authMode, setAuthMode] = useState<"login" | "register">("register");
   const [email, setEmail] = useState("");
@@ -65,30 +106,43 @@ const App = () => {
   const [status, setStatus] = useState<InvoiceStatus>("draft");
   const [invoices, setInvoices] = useState<StoredInvoice[]>([]);
   const [clients, setClients] = useState<SavedClient[]>([]);
+  const [shifts, setShifts] = useState<ShiftRecord[]>([]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
   const [view, setView] = useState<View>("dashboard");
   const [templates, setTemplates] = useState<{ id: string; name: string; description: string }[]>([]);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Set up your account and save reusable invoice settings.");
+  const [message, setMessage] = useState("Set up your freelance workspace, track time, and turn shifts into invoices.");
   const [error, setError] = useState("");
   const [clientForm, setClientForm] = useState(emptyClientForm);
+  const [manualShiftForm, setManualShiftForm] = useState(createInitialManualShiftForm);
+  const [activeShiftNotes, setActiveShiftNotes] = useState("");
 
   const resolvedProfile = useMemo(() => withAssetOrigins(profile), [profile]);
   const summary = useMemo(() => calculateInvoiceSummary(draft), [draft]);
+  const activeShift = useMemo(() => shifts.find((shift) => !shift.clockOutAt) ?? null, [shifts]);
+  const activeBreak = useMemo(() => activeShift?.breaks.find((entry) => !entry.endAt) ?? null, [activeShift]);
+  const completedShifts = useMemo(() => shifts.filter((shift) => shift.clockOutAt), [shifts]);
+  const trackedHours = useMemo(
+    () => shifts.reduce((total, shift) => total + calculateShiftWorkedMinutes(shift) / 60, 0),
+    [shifts],
+  );
 
   const loadWorkspaceData = async () => {
-    const [clientResponse, profileResponse, invoiceResponse, templateResponse] = await Promise.all([
+    const [clientResponse, profileResponse, invoiceResponse, templateResponse, shiftResponse] = await Promise.all([
       api.listClients(),
       api.getProfile(),
       api.listInvoices(),
       api.getTemplates(),
+      api.listShifts(),
     ]);
 
     setClients(clientResponse.clients);
     setProfile(withAssetOrigins(profileResponse.profile));
     setInvoices(invoiceResponse.invoices);
     setTemplates(templateResponse.templates);
+    setShifts(shiftResponse.shifts);
   };
 
   useEffect(() => {
@@ -521,11 +575,199 @@ const App = () => {
     setProfile(createEmptyProfile());
     setInvoices([]);
     setClients([]);
+    setShifts([]);
+    setSelectedShiftIds([]);
+    setActiveShiftNotes("");
+    setManualShiftForm(createInitialManualShiftForm());
     setSelectedClientId("");
     resetClientForm();
     resetDraft();
     setView("dashboard");
     setMessage("Signed out.");
+  };
+
+  const toggleShiftSelection = (shiftId: string) => {
+    setSelectedShiftIds((current) =>
+      current.includes(shiftId) ? current.filter((id) => id !== shiftId) : [...current, shiftId],
+    );
+  };
+
+  const handleClockIn = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.clockIn();
+      setShifts(response.shifts);
+      setMessage("Shift started.");
+      setView("time");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to clock in.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleClockOut = async () => {
+    if (!activeShift) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.clockOut(activeShift.id, activeShiftNotes);
+      setShifts(response.shifts);
+      setActiveShiftNotes("");
+      setMessage("Shift completed and saved.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to clock out.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStartBreak = async (type: string) => {
+    if (!activeShift) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.startBreak(activeShift.id, type);
+      setShifts(response.shifts);
+      setMessage(`${type} started.`);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to start break.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleEndBreak = async () => {
+    if (!activeShift || !activeBreak) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.endBreak(activeShift.id, activeBreak.id);
+      setShifts(response.shifts);
+      setMessage("Break ended.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to end break.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleManualShiftSave = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.createManualShift({
+        startAt: manualShiftForm.startAt,
+        endAt: manualShiftForm.endAt,
+        breakMinutes: Number(manualShiftForm.breakMinutes || 0),
+        notes: manualShiftForm.notes,
+      });
+      setShifts(response.shifts);
+      setManualShiftForm(createInitialManualShiftForm());
+      setMessage("Manual shift saved.");
+      setView("time");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to save manual shift.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const getShiftExportType = (): ShiftExportType => {
+    const selectedShifts = completedShifts.filter((shift) => selectedShiftIds.includes(shift.id));
+    return selectedShifts.some((shift) => shift.exports.length > 0) ? "re-export" : "initial-export";
+  };
+
+  const getShiftInvoiceOptions = (): ShiftInvoiceOptions => {
+    const firstPricedItem = draft.items.find((item) => item.unitPrice > 0);
+    return {
+      invoiceNumber: draft.invoiceNumber || undefined,
+      issuedOn: draft.issueDate || undefined,
+      dueOn: draft.dueDate || undefined,
+      currency: draft.currency || undefined,
+      projectName: draft.projectName || undefined,
+      clientName: draft.client.name || undefined,
+      clientBusiness: draft.client.businessName || undefined,
+      clientEmail: draft.client.email || undefined,
+      clientAddress: draft.client.addressLines.join(";") || undefined,
+      notes: draft.notes || undefined,
+      hourlyRate: firstPricedItem?.unitPrice,
+      unitLabel: firstPricedItem?.unitLabel || undefined,
+    };
+  };
+
+  const createInvoiceFromSelectedShifts = async () => {
+    if (!selectedShiftIds.length) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.exportShifts({
+        shiftIds: selectedShiftIds,
+        type: getShiftExportType(),
+        format: "invoice",
+        invoice: getShiftInvoiceOptions(),
+      });
+      const importedDraft = parseInvoiceFile("tracked-shifts.invoice", response.content);
+      setDraft(importedDraft);
+      setShifts(response.shifts);
+      setSelectedInvoiceId(null);
+      setSourceFormat("time-tracker");
+      setStatus("draft");
+      setView("invoice");
+      setMessage("Selected shifts were handed off through the import format and loaded into the invoice builder.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to hand off shifts to the invoice builder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportSelectedShifts = async (format: ShiftExportFormat) => {
+    if (!selectedShiftIds.length) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await api.exportShifts({
+        shiftIds: selectedShiftIds,
+        type: getShiftExportType(),
+        format,
+        invoice: getShiftInvoiceOptions(),
+      });
+      setShifts(response.shifts);
+      downloadTextFile(response.content, response.filename, response.mimeType);
+      setMessage(
+        format === "invoice"
+          ? `Exported ${response.exportedCount} shift${response.exportedCount === 1 ? "" : "s"} as a compact .invoice file.`
+          : `Exported ${response.exportedCount} shift${response.exportedCount === 1 ? "" : "s"} as CSV.`,
+      );
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to export shifts.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!currentUser) {
@@ -534,7 +776,7 @@ const App = () => {
         <section className="auth-card">
           <p className="eyebrow">Freelance Invoice Generator</p>
           <h1>Minimal invoicing, reusable account settings, and draft saving.</h1>
-          <p className="support-copy">Create one account, reuse your logo and payment info, and import work from CSV, JSON, or compact `.invoice` files.</p>
+          <p className="support-copy">Create one account, track shifts, reuse payment settings, and turn recorded work into invoices.</p>
 
           <div className="auth-toggle">
             <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>
@@ -581,6 +823,9 @@ const App = () => {
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
             Dashboard
           </button>
+          <button className={view === "time" ? "active" : ""} onClick={() => setView("time")}>
+            Time Tracker
+          </button>
           <button className={view === "invoice" ? "active" : ""} onClick={() => setView("invoice")}>
             Invoice Builder
           </button>
@@ -593,6 +838,9 @@ const App = () => {
           <button className="sidebar-action sidebar-action--new" onClick={resetDraft}>
             New invoice
           </button>
+          <button className="sidebar-action" disabled={busy} onClick={() => void handleClockIn()}>
+            Clock in
+          </button>
           <button className="sidebar-action sidebar-action--logout" onClick={logout}>
             Logout
           </button>
@@ -602,7 +850,7 @@ const App = () => {
       <main className="main-shell">
         <header className="topbar">
           <div>
-            <h1>{view === "dashboard" ? "Dashboard" : view === "profile" ? "Profile" : "Invoice Builder"}</h1>
+            <h1>{view === "dashboard" ? "Dashboard" : view === "profile" ? "Profile" : view === "time" ? "Time Tracker" : "Invoice Builder"}</h1>
             <p>{message}</p>
           </div>
           {error ? <div className="status-banner status-banner--error">{error}</div> : null}
@@ -620,8 +868,8 @@ const App = () => {
                   <span>Current draft total</span>
                 </div>
                 <div>
-                  <strong>{templates.length}</strong>
-                  <span>Template ready</span>
+                  <strong>{trackedHours.toFixed(2)}</strong>
+                  <span>Tracked hours</span>
                 </div>
                 <div>
                   <strong>{clients.length}</strong>
@@ -632,8 +880,8 @@ const App = () => {
 
             <article className="panel">
               <span className="section-kicker">Import</span>
-              <h3>Bring in work from Clock Keeper</h3>
-              <p>Clock Keeper can export `.invoice`, CSV, or JSON. Upload here, review, then save or export.</p>
+              <h3>Bring in outside invoice data</h3>
+              <p>Import `.invoice`, CSV, or JSON files, or build new invoice drafts directly from tracked shifts in the Time Tracker.</p>
               <label className="file-input">
                 Import file
                 <input type="file" accept=".invoice,.csv,.json" onChange={(event) => void importInvoiceFile(event.target.files?.[0])} />
@@ -643,6 +891,25 @@ const App = () => {
               </button>
               <button className="secondary-button" onClick={() => void copyClockKeeperLink()}>
                 Copy import link
+              </button>
+            </article>
+
+            <article className="panel">
+              <span className="section-kicker">Time Tracker</span>
+              <h3>{completedShifts.length} completed shift{completedShifts.length === 1 ? "" : "s"}</h3>
+              <p>Clock live work, add manual entries, then send selected shifts straight into the invoice builder.</p>
+              <div className="stat-row stat-row--compact">
+                <div>
+                  <strong>{activeShift ? "Live" : "Idle"}</strong>
+                  <span>Current tracker status</span>
+                </div>
+                <div>
+                  <strong>{shifts.length}</strong>
+                  <span>Total shifts</span>
+                </div>
+              </div>
+              <button className="secondary-button" onClick={() => setView("time")}>
+                Open time tracker
               </button>
             </article>
 
@@ -667,6 +934,187 @@ const App = () => {
                   })
                 ) : (
                   <p>No invoices yet. Create one or import from Clock Keeper.</p>
+                )}
+              </div>
+            </article>
+          </section>
+        ) : null}
+
+        {view === "time" ? (
+          <section className="workspace-grid">
+            <article className="panel">
+              <div className="section-row">
+                <div>
+                  <span className="section-kicker">Shift Controls</span>
+                  <h3>{activeShift ? "Active shift running" : "No active shift"}</h3>
+                </div>
+                <span className={`shift-status-pill shift-status-pill--${activeShift ? getShiftStatus(activeShift) : "completed"}`}>
+                  {activeShift ? getShiftStatus(activeShift).replace("-", " ") : "idle"}
+                </span>
+              </div>
+              {activeShift ? (
+                <>
+                  <p>Started {formatShiftDateTime(activeShift.clockInAt)}.</p>
+                  {activeBreak ? (
+                    <div className="status-banner shift-inline-banner">
+                      <strong>{activeBreak.type}</strong>
+                      <span>Started {formatShiftDateTime(activeBreak.startAt)}</span>
+                    </div>
+                  ) : null}
+                  <label>
+                    Shift notes
+                    <textarea
+                      rows={3}
+                      value={activeShiftNotes}
+                      onChange={(event) => setActiveShiftNotes(event.target.value)}
+                      placeholder="Optional notes for this completed shift"
+                    />
+                  </label>
+                  <div className="action-row">
+                    {activeBreak ? (
+                      <button className="secondary-button" disabled={busy} onClick={() => void handleEndBreak()}>
+                        End break
+                      </button>
+                    ) : (
+                      <>
+                        <button className="secondary-button" disabled={busy} onClick={() => void handleStartBreak("Short Break")}>
+                          Short break
+                        </button>
+                        <button className="secondary-button" disabled={busy} onClick={() => void handleStartBreak("Lunch")}>
+                          Lunch
+                        </button>
+                      </>
+                    )}
+                    <button className="primary-button" disabled={busy} onClick={() => void handleClockOut()}>
+                      Clock out
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="action-row">
+                  <button className="primary-button" disabled={busy} onClick={() => void handleClockIn()}>
+                    Clock in now
+                  </button>
+                </div>
+              )}
+            </article>
+
+            <article className="panel">
+              <span className="section-kicker">Manual Entry</span>
+              <h3>Add past work</h3>
+              <div className="form-grid">
+                <label>
+                  Start
+                  <input
+                    type="datetime-local"
+                    value={manualShiftForm.startAt}
+                    onChange={(event) => setManualShiftForm((current) => ({ ...current, startAt: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  End
+                  <input
+                    type="datetime-local"
+                    value={manualShiftForm.endAt}
+                    onChange={(event) => setManualShiftForm((current) => ({ ...current, endAt: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Break Minutes
+                  <input
+                    type="number"
+                    min="0"
+                    value={manualShiftForm.breakMinutes}
+                    onChange={(event) => setManualShiftForm((current) => ({ ...current, breakMinutes: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Notes
+                  <input
+                    value={manualShiftForm.notes}
+                    onChange={(event) => setManualShiftForm((current) => ({ ...current, notes: event.target.value }))}
+                    placeholder="Homepage revisions"
+                  />
+                </label>
+              </div>
+              <button className="secondary-button" disabled={busy} onClick={() => void handleManualShiftSave()}>
+                Save manual shift
+              </button>
+            </article>
+
+            <article className="panel panel--full">
+              <div className="section-row">
+                <div>
+                  <span className="section-kicker">Tracked Shifts</span>
+                  <h3>Select completed shifts to invoice</h3>
+                </div>
+                <div className="inline-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={busy || selectedShiftIds.length === 0}
+                    onClick={() => void exportSelectedShifts("csv")}
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || selectedShiftIds.length === 0}
+                    onClick={() => void exportSelectedShifts("invoice")}
+                  >
+                    Export `.invoice`
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={busy || selectedShiftIds.length === 0}
+                    onClick={() => void createInvoiceFromSelectedShifts()}
+                  >
+                    Create invoice draft
+                  </button>
+                </div>
+              </div>
+              <div className="shift-list">
+                {shifts.length ? (
+                  shifts.map((shift) => {
+                    const isCompleted = Boolean(shift.clockOutAt);
+                    const selected = selectedShiftIds.includes(shift.id);
+                    return (
+                      <label className={`shift-card ${selected ? "shift-card--selected" : ""}`} key={shift.id}>
+                        <div className="shift-card__select">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={!isCompleted}
+                            onChange={() => toggleShiftSelection(shift.id)}
+                          />
+                        </div>
+                        <div className="shift-card__body">
+                          <div className="section-row">
+                            <strong>{shift.notes || "Tracked shift"}</strong>
+                            <span className={`shift-status-pill shift-status-pill--${getShiftStatus(shift)}`}>
+                              {getShiftStatus(shift).replace("-", " ")}
+                            </span>
+                          </div>
+                          <div className="shift-card__meta">
+                            <span>{formatShiftDateTime(shift.clockInAt)}</span>
+                            <span>{shift.clockOutAt ? formatShiftDateTime(shift.clockOutAt) : "Still running"}</span>
+                            <span>{formatShiftHours(shift)} hours</span>
+                          </div>
+                          {shift.breaks.length ? (
+                            <div className="shift-break-list">
+                              {shift.breaks.map((entry: ShiftBreak) => (
+                                <span key={entry.id}>
+                                  {entry.type}: {formatShiftDateTime(entry.startAt)}
+                                  {entry.endAt ? ` to ${formatShiftDateTime(entry.endAt)}` : " to active"}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <p>No shifts yet. Clock in or add a manual entry to start building the merged workspace.</p>
                 )}
               </div>
             </article>

@@ -2,20 +2,21 @@ import { Router } from "express";
 import type { InvoiceDraft, InvoiceStatus } from "@invoice/shared";
 import { getUserId, requireAuth } from "../middleware/auth.js";
 import { invoiceService } from "../services/invoiceService.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const invoicesRouter = Router();
 
 invoicesRouter.use(requireAuth);
 
-invoicesRouter.get("/", async (request, response) => {
+invoicesRouter.get("/", asyncHandler(async (request, response) => {
   const invoices = await invoiceService.list(getUserId(request));
   response.json({
     invoices,
   });
-});
+}));
 
-invoicesRouter.get("/:invoiceId", async (request, response) => {
-  const invoice = await invoiceService.get(request.params.invoiceId, getUserId(request));
+invoicesRouter.get("/:invoiceId", asyncHandler(async (request, response) => {
+  const invoice = await invoiceService.get(String(request.params.invoiceId), getUserId(request));
 
   if (!invoice) {
     response.status(404).json({
@@ -27,9 +28,9 @@ invoicesRouter.get("/:invoiceId", async (request, response) => {
   response.json({
     invoice,
   });
-});
+}));
 
-invoicesRouter.post("/", async (request, response) => {
+invoicesRouter.post("/", asyncHandler(async (request, response) => {
   const { status, sourceFormat, data } = request.body as {
     status: InvoiceStatus;
     sourceFormat: string;
@@ -45,16 +46,16 @@ invoicesRouter.post("/", async (request, response) => {
   response.status(201).json({
     invoice,
   });
-});
+}));
 
-invoicesRouter.put("/:invoiceId", async (request, response) => {
+invoicesRouter.put("/:invoiceId", asyncHandler(async (request, response) => {
   const { status, sourceFormat, data } = request.body as {
     status: InvoiceStatus;
     sourceFormat: string;
     data: InvoiceDraft;
   };
 
-  const invoice = await invoiceService.update(request.params.invoiceId, getUserId(request), {
+  const invoice = await invoiceService.update(String(request.params.invoiceId), getUserId(request), {
     status,
     sourceFormat: sourceFormat ?? "manual",
     data,
@@ -70,4 +71,4 @@ invoicesRouter.put("/:invoiceId", async (request, response) => {
   response.json({
     invoice,
   });
-});
+}));
