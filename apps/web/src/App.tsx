@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   calculateInvoiceSummary,
   calculateShiftWorkedMinutes,
@@ -25,6 +25,32 @@ import { InvoicePreview } from "./components/InvoicePreview";
 import { exportElementToPdf } from "./utils/pdf";
 
 type View = "dashboard" | "invoice" | "profile" | "time";
+type AppRoute = "/" | "/invoice" | "/clock" | "/profile";
+
+const routeToView: Record<AppRoute, View> = {
+  "/": "dashboard",
+  "/invoice": "invoice",
+  "/clock": "time",
+  "/profile": "profile",
+};
+
+const getRouteFromPathname = (pathname: string): AppRoute => {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+
+  if (normalized === "/invoice") {
+    return "/invoice";
+  }
+
+  if (normalized === "/clock" || normalized === "/time") {
+    return "/clock";
+  }
+
+  if (normalized === "/profile") {
+    return "/profile";
+  }
+
+  return "/";
+};
 
 const emptyClientForm = {
   id: "",
@@ -77,6 +103,19 @@ const toDateTimeInputValue = (value: Date) => {
   return local.toISOString().slice(0, 16);
 };
 
+const formatDuration = (minutes: number) => {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(remainingMinutes).padStart(2, "0")}`;
+};
+
+const formatClockReadout = (value: number) =>
+  new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+
 const formatShiftDateTime = (value: string) =>
   new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
@@ -110,7 +149,7 @@ const App = () => {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
-  const [view, setView] = useState<View>("dashboard");
+  const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => getRouteFromPathname(window.location.pathname));
   const [templates, setTemplates] = useState<{ id: string; name: string; description: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Set up your freelance workspace, track time, and turn shifts into invoices.");
@@ -118,16 +157,41 @@ const App = () => {
   const [clientForm, setClientForm] = useState(emptyClientForm);
   const [manualShiftForm, setManualShiftForm] = useState(createInitialManualShiftForm);
   const [activeShiftNotes, setActiveShiftNotes] = useState("");
+  const [timeSettingsOpen, setTimeSettingsOpen] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
+  const view = routeToView[currentRoute];
   const resolvedProfile = useMemo(() => withAssetOrigins(profile), [profile]);
   const summary = useMemo(() => calculateInvoiceSummary(draft), [draft]);
   const activeShift = useMemo(() => shifts.find((shift) => !shift.clockOutAt) ?? null, [shifts]);
   const activeBreak = useMemo(() => activeShift?.breaks.find((entry) => !entry.endAt) ?? null, [activeShift]);
   const completedShifts = useMemo(() => shifts.filter((shift) => shift.clockOutAt), [shifts]);
+  const recentCompletedShifts = useMemo(() => completedShifts.slice(0, 2), [completedShifts]);
   const trackedHours = useMemo(
     () => shifts.reduce((total, shift) => total + calculateShiftWorkedMinutes(shift) / 60, 0),
     [shifts],
   );
+  const activeShiftMinutes = activeShift ? calculateShiftWorkedMinutes(activeShift) : 0;
+  const activeBreakMinutes = activeBreak
+    ? Math.max(0, Math.round((clockNow - new Date(activeBreak.startAt).getTime()) / 60000))
+    : 0;
+  const clockStatus = activeShift ? getShiftStatus(activeShift) : "completed";
+  const clockDate = new Date(clockNow);
+  const clockHourRotation = (clockDate.getHours() % 12) * 30 + clockDate.getMinutes() * 0.5;
+  const clockMinuteRotation = clockDate.getMinutes() * 6 + clockDate.getSeconds() * 0.1;
+  const clockSecondRotation = clockDate.getSeconds() * 6;
+
+  const navigateTo = (route: AppRoute, options?: { replace?: boolean }) => {
+    const nextRoute = route === currentRoute ? currentRoute : route;
+    const historyMethod = options?.replace ? "replaceState" : "pushState";
+
+    if (window.location.pathname !== nextRoute) {
+      window.history[historyMethod]({}, "", nextRoute);
+    }
+
+    setCurrentRoute(nextRoute);
+    setTimeSettingsOpen(false);
+  };
 
   const loadWorkspaceData = async () => {
     const [clientResponse, profileResponse, invoiceResponse, templateResponse, shiftResponse] = await Promise.all([
@@ -144,6 +208,33 @@ const App = () => {
     setTemplates(templateResponse.templates);
     setShifts(shiftResponse.shifts);
   };
+
+  useEffect(() => {
+    const nextRoute = getRouteFromPathname(window.location.pathname);
+    if (window.location.pathname !== nextRoute) {
+      window.history.replaceState({}, "", nextRoute);
+    }
+    setCurrentRoute(nextRoute);
+
+    const handlePopState = () => {
+      setCurrentRoute(getRouteFromPathname(window.location.pathname));
+      setTimeSettingsOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setClockNow(Date.now()), 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -171,7 +262,7 @@ const App = () => {
           setSourceFormat("clock-keeper");
           setStatus("draft");
           setSelectedInvoiceId(null);
-          setView("invoice");
+          navigateTo("/invoice", { replace: true });
           setMessage("Imported draft from Clock Keeper. Review it and save when ready.");
           localStorage.removeItem(pendingImportKey);
         } else {
@@ -202,11 +293,11 @@ const App = () => {
         setSourceFormat("clock-keeper");
         setStatus("draft");
         setSelectedInvoiceId(null);
-        setView("invoice");
+        navigateTo("/invoice");
         setMessage("Imported draft from Clock Keeper. Review it and save when ready.");
         localStorage.removeItem(pendingImportKey);
       } else {
-        setView("dashboard");
+        navigateTo("/");
         setMessage(authMode === "register" ? "Account created. Let’s save your business profile next." : "Logged in.");
       }
     } catch (caughtError) {
@@ -352,7 +443,7 @@ const App = () => {
       setClients(refreshedClients.clients);
       setSelectedClientId(response.client.id);
       populateClientForm(response.client);
-      setView("profile");
+      navigateTo("/profile");
       setMessage(existingClient ? "Saved client updated from the invoice." : "Current invoice client saved to your reusable library.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to save current client.");
@@ -477,7 +568,7 @@ const App = () => {
     setStatus("draft");
     setSourceFormat("manual");
     setSelectedInvoiceId(null);
-    setView("invoice");
+    navigateTo("/invoice");
     setMessage("Fresh invoice draft ready.");
   };
 
@@ -486,7 +577,7 @@ const App = () => {
     setDraft(invoice.data);
     setStatus(invoice.status);
     setSourceFormat(invoice.sourceFormat);
-    setView("invoice");
+    navigateTo("/invoice");
     setMessage(`Loaded ${invoice.data.invoiceNumber}.`);
   };
 
@@ -541,7 +632,7 @@ const App = () => {
       setSourceFormat(file.name.split(".").pop() ?? "import");
       setStatus("draft");
       setSelectedInvoiceId(null);
-      setView("invoice");
+      navigateTo("/invoice");
       setMessage(`Imported data from ${file.name}. Review, then save as a draft or finalize.`);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to import file.");
@@ -564,7 +655,7 @@ const App = () => {
 
   const copyClockKeeperLink = async () => {
     const payload = encodeInvoicePayload(draft);
-    const url = `${window.location.origin}/?import=${payload}`;
+    const url = `${window.location.origin}/invoice?import=${payload}`;
     await navigator.clipboard.writeText(url);
     setMessage("Clock Keeper import link copied.");
   };
@@ -582,7 +673,7 @@ const App = () => {
     setSelectedClientId("");
     resetClientForm();
     resetDraft();
-    setView("dashboard");
+    navigateTo("/", { replace: true });
     setMessage("Signed out.");
   };
 
@@ -600,7 +691,7 @@ const App = () => {
       const response = await api.clockIn();
       setShifts(response.shifts);
       setMessage("Shift started.");
-      setView("time");
+      navigateTo("/clock");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to clock in.");
     } finally {
@@ -680,7 +771,7 @@ const App = () => {
       setShifts(response.shifts);
       setManualShiftForm(createInitialManualShiftForm());
       setMessage("Manual shift saved.");
-      setView("time");
+      navigateTo("/clock");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to save manual shift.");
     } finally {
@@ -732,7 +823,7 @@ const App = () => {
       setSelectedInvoiceId(null);
       setSourceFormat("time-tracker");
       setStatus("draft");
-      setView("invoice");
+      navigateTo("/invoice");
       setMessage("Selected shifts were handed off through the import format and loaded into the invoice builder.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to hand off shifts to the invoice builder.");
@@ -770,13 +861,31 @@ const App = () => {
     }
   };
 
+  const pageTitle =
+    currentRoute === "/"
+      ? "Freelance Dashboard"
+      : currentRoute === "/clock"
+        ? "Timekeeper"
+        : currentRoute === "/invoice"
+          ? "Invoice Generator"
+          : "Profile";
+
+  const pageSubtitle =
+    currentRoute === "/"
+      ? "Choose a tool, keep your data together, and add more modules later."
+      : currentRoute === "/clock"
+        ? "Track work with the simple Clock Keeper flow, now inside the dashboard."
+        : currentRoute === "/invoice"
+          ? "Build, import, save, and export invoices from the same workspace."
+          : "Manage your identity, payment details, and reusable clients.";
+
   if (!currentUser) {
     return (
       <main className="auth-shell">
         <section className="auth-card">
-          <p className="eyebrow">Freelance Invoice Generator</p>
-          <h1>Minimal invoicing, reusable account settings, and draft saving.</h1>
-          <p className="support-copy">Create one account, track shifts, reuse payment settings, and turn recorded work into invoices.</p>
+          <p className="eyebrow">Freelance Dashboard</p>
+          <h1>One home for your invoices, time tracking, and whatever app comes next.</h1>
+          <p className="support-copy">Create one account, then open Invoice Generator or Timekeeper from the dashboard.</p>
 
           <div className="auth-toggle">
             <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>
@@ -812,109 +921,121 @@ const App = () => {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Invoice Studio</p>
-          <h2>{currentUser.email}</h2>
+    <div className={`workspace-shell ${currentRoute === "/clock" ? `workspace-shell--clock workspace-shell--${clockStatus}` : ""}`}>
+      <header className="workspace-header">
+        <div className="workspace-brand">
+          <p className="eyebrow">Freelance Dashboard</p>
+          <h1>{pageTitle}</h1>
+          <p>{pageSubtitle}</p>
         </div>
 
-        <nav className="sidebar-nav">
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
-            Dashboard
-          </button>
-          <button className={view === "time" ? "active" : ""} onClick={() => setView("time")}>
-            Time Tracker
-          </button>
-          <button className={view === "invoice" ? "active" : ""} onClick={() => setView("invoice")}>
-            Invoice Builder
-          </button>
-          <button className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>
-            Profile
-          </button>
-        </nav>
+        <div className="workspace-header__stack">
+          <nav className="workspace-nav">
+            <button className={currentRoute === "/" ? "active" : ""} onClick={() => navigateTo("/")}>
+              Dashboard
+            </button>
+            <button className={currentRoute === "/invoice" ? "active" : ""} onClick={() => navigateTo("/invoice")}>
+              Invoice Generator
+            </button>
+            <button className={currentRoute === "/clock" ? "active" : ""} onClick={() => navigateTo("/clock")}>
+              Timekeeper
+            </button>
+            <button className={currentRoute === "/profile" ? "active" : ""} onClick={() => navigateTo("/profile")}>
+              Profile
+            </button>
+          </nav>
 
-        <div className="sidebar-actions">
-          <button className="sidebar-action sidebar-action--new" onClick={resetDraft}>
-            New invoice
-          </button>
-          <button className="sidebar-action" disabled={busy} onClick={() => void handleClockIn()}>
-            Clock in
-          </button>
-          <button className="sidebar-action sidebar-action--logout" onClick={logout}>
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      <main className="main-shell">
-        <header className="topbar">
-          <div>
-            <h1>{view === "dashboard" ? "Dashboard" : view === "profile" ? "Profile" : view === "time" ? "Time Tracker" : "Invoice Builder"}</h1>
-            <p>{message}</p>
+          <div className="workspace-actions">
+            <span className="workspace-user">{currentUser.email}</span>
+            <button className="secondary-button" onClick={resetDraft}>
+              New invoice
+            </button>
+            <button className="secondary-button" disabled={busy || Boolean(activeShift)} onClick={() => void handleClockIn()}>
+              Clock in
+            </button>
+            <button className="text-button" onClick={logout}>
+              Logout
+            </button>
           </div>
-          {error ? <div className="status-banner status-banner--error">{error}</div> : null}
-        </header>
+        </div>
+      </header>
 
-        {view === "dashboard" ? (
+      {error ? <div className="status-banner status-banner--error">{error}</div> : null}
+
+      {view === "dashboard" ? (
+        <section className="dashboard-home">
+          <article className="panel dashboard-hero-panel">
+            <span className="section-kicker">Workspace Home</span>
+            <h2>Freelance Dashboard</h2>
+            <p>Use one home for time tracking, invoices, reusable client settings, and whatever app you add next.</p>
+            <div className="stat-row">
+              <div>
+                <strong>{invoices.length}</strong>
+                <span>Saved invoices</span>
+              </div>
+              <div>
+                <strong>{trackedHours.toFixed(2)}</strong>
+                <span>Tracked hours</span>
+              </div>
+              <div>
+                <strong>{clients.length}</strong>
+                <span>Saved clients</span>
+              </div>
+            </div>
+          </article>
+
+          <div className="dashboard-app-grid">
+            <button className="dashboard-app-card dashboard-app-card--invoice" onClick={() => navigateTo("/invoice")}>
+              <span className="section-kicker">App 01</span>
+              <h3>Invoice Generator</h3>
+              <p>Create, import, save, and export invoice drafts from a dedicated page.</p>
+              <strong>{selectedInvoiceId ? "Resume current draft" : "Open app"}</strong>
+            </button>
+
+            <button className="dashboard-app-card dashboard-app-card--clock" onClick={() => navigateTo("/clock")}>
+              <span className="section-kicker">App 02</span>
+              <h3>Timekeeper</h3>
+              <p>Keep the simple Clock Keeper flow, with its own page and cleaner separation from invoicing.</p>
+              <strong>{activeShift ? "Active shift running" : "Open app"}</strong>
+            </button>
+
+            <button className="dashboard-app-card dashboard-app-card--profile" onClick={() => navigateTo("/profile")}>
+              <span className="section-kicker">Settings</span>
+              <h3>Business Profile</h3>
+              <p>Store logos, payment details, and reusable client records that both apps can share.</p>
+              <strong>Manage profile</strong>
+            </button>
+          </div>
+
           <section className="dashboard-grid">
             <article className="panel">
-              <span className="section-kicker">Workspace</span>
-              <h3>{invoices.length} saved invoice{invoices.length === 1 ? "" : "s"}</h3>
-              <p>Drafts stay editable, finalized invoices stay reusable, and your payment settings stay attached to your account.</p>
-              <div className="stat-row">
-                <div>
-                  <strong>${summary.total.toFixed(2)}</strong>
-                  <span>Current draft total</span>
-                </div>
-                <div>
-                  <strong>{trackedHours.toFixed(2)}</strong>
-                  <span>Tracked hours</span>
-                </div>
-                <div>
-                  <strong>{clients.length}</strong>
-                  <span>Saved clients</span>
-                </div>
-              </div>
-            </article>
-
-            <article className="panel">
-              <span className="section-kicker">Import</span>
-              <h3>Bring in outside invoice data</h3>
-              <p>Import `.invoice`, CSV, or JSON files, or build new invoice drafts directly from tracked shifts in the Time Tracker.</p>
+              <span className="section-kicker">Imports</span>
+              <h3>Bring in invoice data</h3>
+              <p>Import `.invoice`, CSV, or JSON files, or hand off selected shifts from Timekeeper into the invoice page.</p>
               <label className="file-input">
                 Import file
                 <input type="file" accept=".invoice,.csv,.json" onChange={(event) => void importInvoiceFile(event.target.files?.[0])} />
               </label>
-              <button className="secondary-button" onClick={downloadInvoiceFormat}>
-                Download current `.invoice`
-              </button>
-              <button className="secondary-button" onClick={() => void copyClockKeeperLink()}>
-                Copy import link
-              </button>
-            </article>
-
-            <article className="panel">
-              <span className="section-kicker">Time Tracker</span>
-              <h3>{completedShifts.length} completed shift{completedShifts.length === 1 ? "" : "s"}</h3>
-              <p>Clock live work, add manual entries, then send selected shifts straight into the invoice builder.</p>
-              <div className="stat-row stat-row--compact">
-                <div>
-                  <strong>{activeShift ? "Live" : "Idle"}</strong>
-                  <span>Current tracker status</span>
-                </div>
-                <div>
-                  <strong>{shifts.length}</strong>
-                  <span>Total shifts</span>
-                </div>
+              <div className="inline-actions">
+                <button className="secondary-button" onClick={downloadInvoiceFormat}>
+                  Download current `.invoice`
+                </button>
+                <button className="secondary-button" onClick={() => void copyClockKeeperLink()}>
+                  Copy import link
+                </button>
               </div>
-              <button className="secondary-button" onClick={() => setView("time")}>
-                Open time tracker
-              </button>
             </article>
 
             <article className="panel panel--full">
-              <span className="section-kicker">Saved Invoices</span>
+              <div className="section-row">
+                <div>
+                  <span className="section-kicker">Recent Invoices</span>
+                  <h3>Pick up where you left off</h3>
+                </div>
+                <button className="secondary-button" onClick={() => navigateTo("/invoice")}>
+                  Open invoice app
+                </button>
+              </div>
               <div className="invoice-list">
                 {invoices.length ? (
                   invoices.map((invoice) => {
@@ -933,78 +1054,179 @@ const App = () => {
                     );
                   })
                 ) : (
-                  <p>No invoices yet. Create one or import from Clock Keeper.</p>
+                  <p>No invoices yet. Open Invoice Generator to start your first draft.</p>
                 )}
               </div>
             </article>
           </section>
-        ) : null}
+        </section>
+      ) : null}
 
-        {view === "time" ? (
-          <section className="workspace-grid">
-            <article className="panel">
-              <div className="section-row">
-                <div>
-                  <span className="section-kicker">Shift Controls</span>
-                  <h3>{activeShift ? "Active shift running" : "No active shift"}</h3>
-                </div>
-                <span className={`shift-status-pill shift-status-pill--${activeShift ? getShiftStatus(activeShift) : "completed"}`}>
-                  {activeShift ? getShiftStatus(activeShift).replace("-", " ") : "idle"}
-                </span>
+      {view === "time" ? (
+        <section className={`timekeeper-page timekeeper-page--${clockStatus === "completed" ? "off" : clockStatus === "on-break" ? "break" : "on"}`}>
+          <article className="time-card">
+            <header className="card-top">
+              <div>
+                <p className="micro-label">Timekeeper</p>
+                <h2>{activeShift ? "Shift in progress" : "Ready when you are"}</h2>
               </div>
-              {activeShift ? (
-                <>
-                  <p>Started {formatShiftDateTime(activeShift.clockInAt)}.</p>
-                  {activeBreak ? (
-                    <div className="status-banner shift-inline-banner">
-                      <strong>{activeBreak.type}</strong>
-                      <span>Started {formatShiftDateTime(activeBreak.startAt)}</span>
-                    </div>
-                  ) : null}
-                  <label>
-                    Shift notes
-                    <textarea
-                      rows={3}
-                      value={activeShiftNotes}
-                      onChange={(event) => setActiveShiftNotes(event.target.value)}
-                      placeholder="Optional notes for this completed shift"
-                    />
-                  </label>
-                  <div className="action-row">
-                    {activeBreak ? (
-                      <button className="secondary-button" disabled={busy} onClick={() => void handleEndBreak()}>
-                        End break
-                      </button>
-                    ) : (
-                      <>
-                        <button className="secondary-button" disabled={busy} onClick={() => void handleStartBreak("Short Break")}>
-                          Short break
-                        </button>
-                        <button className="secondary-button" disabled={busy} onClick={() => void handleStartBreak("Lunch")}>
-                          Lunch
-                        </button>
-                      </>
-                    )}
-                    <button className="primary-button" disabled={busy} onClick={() => void handleClockOut()}>
-                      Clock out
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="action-row">
-                  <button className="primary-button" disabled={busy} onClick={() => void handleClockIn()}>
-                    Clock in now
-                  </button>
-                </div>
-              )}
-            </article>
+              <button className="icon-btn" type="button" aria-label="Open timekeeper settings" onClick={() => setTimeSettingsOpen(true)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.12-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />
+                </svg>
+              </button>
+            </header>
 
-            <article className="panel">
-              <span className="section-kicker">Manual Entry</span>
-              <h3>Add past work</h3>
-              <div className="form-grid">
+            <p className="status-pill">
+              {clockStatus === "completed" ? "Off the clock" : clockStatus === "on-break" ? "On break" : "On the clock"}
+            </p>
+
+            <div className="clock-hero main-clock">
+              <div className="clock-illustration">
+                {Array.from({ length: 12 }, (_, index) => (
+                  <span className="tick" key={index} style={{ "--rotation": `${index * 30}deg` } as CSSProperties} />
+                ))}
+                <span className="clock-hand hour-hand" style={{ transform: `rotate(${clockHourRotation}deg)` }} />
+                <span className="clock-hand minute-hand" style={{ transform: `rotate(${clockMinuteRotation}deg)` }} />
+                <span className="clock-hand second-hand" style={{ transform: `rotate(${clockSecondRotation}deg)` }} />
+              </div>
+              <div className="clock-readout">{formatClockReadout(clockNow)}</div>
+              <h3 className="timekeeper-headline">
+                {activeShift ? (activeBreak ? activeBreak.type : "Shift running") : "Clock in fast. Export everything later."}
+              </h3>
+              <p className="status-subtext">
+                {activeShift
+                  ? activeBreak
+                    ? `Break started ${formatShiftDateTime(activeBreak.startAt)}.`
+                    : `Started ${formatShiftDateTime(activeShift.clockInAt)}.`
+                  : "Start a shift, then open settings to add missed work or export entries."}
+              </p>
+            </div>
+
+            <div className="metric-row">
+              <div className="metric-chip">
+                <span>Shift</span>
+                <strong>{formatDuration(activeShiftMinutes)}</strong>
+              </div>
+              <div className="metric-chip">
+                <span>Break</span>
+                <strong>{formatDuration(activeBreakMinutes)}</strong>
+              </div>
+            </div>
+
+            <div className="action-stack">
+              <div className="primary-actions">
+                <button className="primary-btn" disabled={busy || Boolean(activeShift)} onClick={() => void handleClockIn()}>
+                  Clock In
+                </button>
+                <button className="primary-btn" disabled={busy || !activeShift} onClick={() => void handleClockOut()}>
+                  Clock Out
+                </button>
+              </div>
+              <div className="secondary-actions">
+                <button
+                  className="secondary-btn"
+                  disabled={busy || !activeShift || Boolean(activeBreak)}
+                  onClick={() => void handleStartBreak("Lunch")}
+                >
+                  Lunch
+                </button>
+                <button
+                  className="secondary-btn"
+                  disabled={busy || !activeShift || Boolean(activeBreak)}
+                  onClick={() => void handleStartBreak("Short Break")}
+                >
+                  Short Break
+                </button>
+                <button className="secondary-btn" disabled={busy || !activeBreak} onClick={() => void handleEndBreak()}>
+                  End Break
+                </button>
+              </div>
+            </div>
+
+            <p className="feedback center-feedback">{message}</p>
+
+            {activeShift ? (
+              <section className="detail-panel">
+                <label className="panel-label">
+                  Shift Notes
+                  <textarea
+                    rows={5}
+                    value={activeShiftNotes}
+                    onChange={(event) => setActiveShiftNotes(event.target.value)}
+                    placeholder="Add notes for this shift, job site, or client"
+                  />
+                </label>
+              </section>
+            ) : null}
+
+            <section className="detail-panel">
+              <div className="panel-heading-row">
+                <div>
+                  <p className="micro-label">Previous Shifts</p>
+                  <h3 className="panel-title">Recent completed entries</h3>
+                </div>
+                <button className="text-btn" type="button" onClick={() => setTimeSettingsOpen(true)}>
+                  Open Settings
+                </button>
+              </div>
+              <div className="recent-list">
+                {recentCompletedShifts.length ? (
+                  recentCompletedShifts.map((shift) => (
+                    <div className="timeline-card" key={shift.id}>
+                      <div className="entry-topline">
+                        <strong>{shift.notes || "Tracked shift"}</strong>
+                        <span>{formatShiftHours(shift)} hrs</span>
+                      </div>
+                      <div className="entry-meta">
+                        {formatShiftDateTime(shift.clockInAt)}
+                        {shift.clockOutAt ? ` to ${formatShiftDateTime(shift.clockOutAt)}` : ""}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state">No completed shifts yet.</div>
+                )}
+              </div>
+            </section>
+          </article>
+
+          <div className={`settings-scrim ${timeSettingsOpen ? "" : "hidden"}`} onClick={() => setTimeSettingsOpen(false)} />
+
+          <aside className={`settings-drawer ${timeSettingsOpen ? "" : "hidden"}`} aria-hidden={!timeSettingsOpen}>
+            <div className="settings-header">
+              <div>
+                <p className="micro-label">Account</p>
+                <h3>Settings and exports</h3>
+              </div>
+              <button className="text-btn" type="button" onClick={() => setTimeSettingsOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <section className="settings-section">
+              <h4>Workspace</h4>
+              <p className="muted-text">Timekeeper now lives as its own page inside Freelance Dashboard, while still sharing your account and invoice data.</p>
+              <div className="stacked-actions">
+                <button className="secondary-btn full-width" type="button" onClick={() => navigateTo("/invoice")}>
+                  Open Invoice Generator
+                </button>
+                <button className="ghost-btn full-width" type="button" onClick={() => navigateTo("/profile")}>
+                  Open Profile
+                </button>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="panel-heading-row">
+                <div>
+                  <h4>Add Missed Shift</h4>
+                  <p className="muted-text">Create a completed past shift before exporting payroll or invoice data.</p>
+                </div>
+              </div>
+              <div className="stacked-actions">
                 <label>
-                  Start
+                  Start time
                   <input
                     type="datetime-local"
                     value={manualShiftForm.startAt}
@@ -1012,7 +1234,7 @@ const App = () => {
                   />
                 </label>
                 <label>
-                  End
+                  End time
                   <input
                     type="datetime-local"
                     value={manualShiftForm.endAt}
@@ -1020,7 +1242,7 @@ const App = () => {
                   />
                 </label>
                 <label>
-                  Break Minutes
+                  Break minutes
                   <input
                     type="number"
                     min="0"
@@ -1029,99 +1251,65 @@ const App = () => {
                   />
                 </label>
                 <label>
-                  Notes
-                  <input
+                  Shift notes
+                  <textarea
+                    rows={3}
                     value={manualShiftForm.notes}
                     onChange={(event) => setManualShiftForm((current) => ({ ...current, notes: event.target.value }))}
-                    placeholder="Homepage revisions"
+                    placeholder="Optional task or work description"
                   />
                 </label>
+                <button className="primary-btn full-width" type="button" disabled={busy} onClick={() => void handleManualShiftSave()}>
+                  Save Missed Shift
+                </button>
               </div>
-              <button className="secondary-button" disabled={busy} onClick={() => void handleManualShiftSave()}>
-                Save manual shift
-              </button>
-            </article>
+            </section>
 
-            <article className="panel panel--full">
-              <div className="section-row">
+            <section className="settings-section">
+              <div className="panel-heading-row">
                 <div>
-                  <span className="section-kicker">Tracked Shifts</span>
-                  <h3>Select completed shifts to invoice</h3>
+                  <h4>Export Completed Shifts</h4>
+                  <p className="muted-text">Select completed entries to export as CSV or `.invoice`, or send them straight into Invoice Generator.</p>
                 </div>
-                <div className="inline-actions">
-                  <button
-                    className="secondary-button"
-                    disabled={busy || selectedShiftIds.length === 0}
-                    onClick={() => void exportSelectedShifts("csv")}
-                  >
+              </div>
+              <div className="stacked-actions">
+                <div className="button-pair">
+                  <button className="secondary-btn" type="button" disabled={busy || selectedShiftIds.length === 0} onClick={() => void exportSelectedShifts("csv")}>
                     Export CSV
                   </button>
-                  <button
-                    className="secondary-button"
-                    disabled={busy || selectedShiftIds.length === 0}
-                    onClick={() => void exportSelectedShifts("invoice")}
-                  >
+                  <button className="secondary-btn" type="button" disabled={busy || selectedShiftIds.length === 0} onClick={() => void exportSelectedShifts("invoice")}>
                     Export `.invoice`
                   </button>
-                  <button
-                    className="primary-button"
-                    disabled={busy || selectedShiftIds.length === 0}
-                    onClick={() => void createInvoiceFromSelectedShifts()}
-                  >
-                    Create invoice draft
-                  </button>
                 </div>
+                <button className="primary-btn full-width" type="button" disabled={busy || selectedShiftIds.length === 0} onClick={() => void createInvoiceFromSelectedShifts()}>
+                  Create invoice draft
+                </button>
               </div>
-              <div className="shift-list">
-                {shifts.length ? (
-                  shifts.map((shift) => {
-                    const isCompleted = Boolean(shift.clockOutAt);
+              <div className="selection-list">
+                {completedShifts.length ? (
+                  completedShifts.map((shift) => {
                     const selected = selectedShiftIds.includes(shift.id);
                     return (
-                      <label className={`shift-card ${selected ? "shift-card--selected" : ""}`} key={shift.id}>
-                        <div className="shift-card__select">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            disabled={!isCompleted}
-                            onChange={() => toggleShiftSelection(shift.id)}
-                          />
+                      <label className="selection-card" key={shift.id}>
+                        <div className="checkbox-row">
+                          <input type="checkbox" checked={selected} onChange={() => toggleShiftSelection(shift.id)} />
+                          <strong>{shift.notes || "Tracked shift"}</strong>
+                          <span>{formatShiftHours(shift)} hrs</span>
                         </div>
-                        <div className="shift-card__body">
-                          <div className="section-row">
-                            <strong>{shift.notes || "Tracked shift"}</strong>
-                            <span className={`shift-status-pill shift-status-pill--${getShiftStatus(shift)}`}>
-                              {getShiftStatus(shift).replace("-", " ")}
-                            </span>
-                          </div>
-                          <div className="shift-card__meta">
-                            <span>{formatShiftDateTime(shift.clockInAt)}</span>
-                            <span>{shift.clockOutAt ? formatShiftDateTime(shift.clockOutAt) : "Still running"}</span>
-                            <span>{formatShiftHours(shift)} hours</span>
-                          </div>
-                          {shift.breaks.length ? (
-                            <div className="shift-break-list">
-                              {shift.breaks.map((entry: ShiftBreak) => (
-                                <span key={entry.id}>
-                                  {entry.type}: {formatShiftDateTime(entry.startAt)}
-                                  {entry.endAt ? ` to ${formatShiftDateTime(entry.endAt)}` : " to active"}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
+                        <div className="entry-meta">{formatShiftDateTime(shift.clockInAt)}</div>
                       </label>
                     );
                   })
                 ) : (
-                  <p>No shifts yet. Clock in or add a manual entry to start building the merged workspace.</p>
+                  <div className="empty-state">No completed shifts available to export yet.</div>
                 )}
               </div>
-            </article>
-          </section>
-        ) : null}
+            </section>
+          </aside>
+        </section>
+      ) : null}
 
-        {view === "profile" && profile ? (
+      {view === "profile" && profile ? (
           <section className="workspace-grid">
             <article className="panel">
               <span className="section-kicker">Business Identity</span>
@@ -1514,7 +1702,6 @@ const App = () => {
             <InvoicePreview draft={draft} profile={resolvedProfile} />
           </section>
         ) : null}
-      </main>
     </div>
   );
 };

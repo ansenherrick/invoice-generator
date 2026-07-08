@@ -5,6 +5,18 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/index"
+    },
+    {
+      "source": "/invoice",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/clock",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/profile",
+      "destination": "/index.html"
     }
   ]
 }
