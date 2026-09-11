@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+apps/web/dist
+apps/api/dist
+packages/shared/dist
+.env
+.DS_Store
+coverage
+uploads/*
+!uploads/.gitkeep
