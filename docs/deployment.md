@@ -1,5 +1,8 @@
 # Deployment guide
 
+This documents the previous Vercel/Supabase deployment. The current site runs
+on the desktop PC; follow [Local server deployment](local-server.md).
+
 ## Target architecture
 
 - one Vercel app
@@ -27,10 +30,11 @@ The invoice module does not read tracker tables directly to create invoice draft
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_STORAGE_BUCKET`
+- `STORAGE_BACKEND=supabase` (explicit opt-in; the default is local storage)
 
 ## Recommended values
 
-- `DATABASE_URL`: use the Supabase transaction pooler connection string for serverless deployments
+- `DATABASE_URL`: use the Supabase transaction pooler connection string with explicit TLS settings (such as `sslmode=verify-full`) for serverless deployments
 - `WEB_ORIGIN`: your deployed app origin, for example `https://your-invoice-app.vercel.app`
 - `SUPABASE_STORAGE_BUCKET`: `invoice-assets`
 
@@ -62,6 +66,6 @@ If the root is set to `apps/api`, Vercel will look for workspace-local scripts a
 ## Notes
 
 - The frontend talks to `/api/*`, so same-origin deployment stays simple
-- Supabase Storage is used automatically when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present
-- Local file uploads remain available in development when Supabase env vars are absent
+- Supabase Storage is used only when `STORAGE_BACKEND=supabase` and its credentials are present
+- Local file uploads are the default (`STORAGE_BACKEND=local`)
 - One database is used for both modules, but the business data remains separated by table family and route boundaries

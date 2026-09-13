@@ -1,6 +1,6 @@
 # Freelance Toolset
 
-A combined freelance toolset built as one repo, one deployable Vercel app, and one Supabase-backed backend with separate product domains inside it:
+A combined freelance toolset hosted on this PC with Docker, local PostgreSQL, and a persistent local upload volume:
 
 - `apps/web`: React + Vite frontend
 - `apps/api`: Express + PostgreSQL backend
@@ -31,6 +31,11 @@ These modules share authentication and deployment infrastructure, but they do no
 - Template registry with a first `modern-minimal` template
 
 ## Local setup
+
+The live site at `https://freelance.ansenherrick.com` uses the sibling
+`desktop-services` stack. For its deployment and maintenance commands, see
+[Local server deployment](docs/local-server.md). Supabase and Vercel are not
+required. The steps below are for a separate development environment.
 
 1. Copy `.env.example` to `.env`
 2. Start Postgres:
@@ -71,28 +76,26 @@ This writes local test data to `apps/api/dev-data.json`, so registration, login,
 
 ## Architecture notes
 
-- This repo is intended to deploy as one Vercel app and use one Supabase project.
+- The current deployment runs the frontend, API, and PostgreSQL in Docker on this PC.
 - Authentication is shared at the app level through the `users` table.
 - Invoice data and tracker data are kept separate in different table families inside the same Postgres database.
 - The invoice module does not query tracker tables to create invoices. It consumes the same compact `.invoice` handoff format used by external integrations.
 - User profile data is stored as JSONB in Postgres so future invoice fields and templates can evolve without an early migration burden.
 - Invoice drafts and finalized invoices are also stored as JSONB, with `status`, `template_id`, and `source_format` indexed separately for flexibility.
 - Time tracker shifts, breaks, and exports live in their own tracker tables.
-- Uploads use a storage abstraction boundary. Locally they are written to `uploads/`, and when Supabase env vars are present they are pushed to Supabase Storage.
+- Uploads use local files by default (`STORAGE_BACKEND=local`). Supabase storage requires an explicit `STORAGE_BACKEND=supabase` setting as well as credentials; leftover credentials do not switch storage providers.
 - The frontend imports shared parsing logic from `packages/shared`, so the internal tracker and any external tool can use the same `.invoice` contract.
 
-## Supabase storage note
+## Data on this PC
 
-For logos and signatures, Supabase Storage usage is typically small if we keep files lightweight:
-
-- logos: usually tens to a few hundred KB
-- signatures: usually very small transparent PNGs
-
-That means storage cost should stay low for this use case, especially if we add file-size limits and optionally compress uploads later.
+Accounts, profiles, invoices, and time-tracker records use the local database.
+Logos and signatures use the Docker upload volume. This is a fresh deployment;
+previous Supabase accounts, records, and files have not been imported.
 
 ## Key docs
 
-- [Deployment guide](./docs/deployment.md)
+- [Local server deployment](./docs/local-server.md)
+- [Legacy hosted deployment guide](./docs/deployment.md)
 - [Architecture and domain separation](./docs/architecture.md)
 - [Supabase + Vercel checklist](./docs/supabase-vercel-checklist.md)
 - [Compact `.invoice` format](./docs/invoice-format.md)

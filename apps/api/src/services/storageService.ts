@@ -12,7 +12,7 @@ const cleanFileName = (fileName: string) =>
     .replace(/^-+|-+$/g, "");
 
 const supabaseAdmin =
-  env.supabaseUrl && env.supabaseServiceRoleKey
+  env.storageBackend === "supabase"
     ? createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
         auth: {
           persistSession: false,
@@ -53,7 +53,7 @@ const uploadToSupabase = async (kind: UploadKind, userId: string, file: Express.
 
 export const storageService = {
   async uploadProfileImage(kind: UploadKind, userId: string, file: Express.Multer.File) {
-    if (env.supabaseUrl && env.supabaseServiceRoleKey) {
+    if (env.storageBackend === "supabase") {
       return uploadToSupabase(kind, userId, file);
     }
 

@@ -10,6 +10,7 @@ RUN npm ci
 
 COPY . ./
 RUN npm run build
+RUN npm run test --workspace @invoice/api
 
 FROM node:22-alpine AS api
 
