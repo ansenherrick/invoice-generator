@@ -34,8 +34,9 @@ These modules share authentication and deployment infrastructure, but they do no
 
 The live site at `https://freelance.ansenherrick.com` uses the sibling
 `desktop-services` stack. For its deployment and maintenance commands, see
-[Local server deployment](docs/local-server.md). Supabase and Vercel are not
-required. The steps below are for a separate development environment.
+[Local server deployment](docs/local-server.md). 
+
+Supabase and Vercel are no longer required. The steps below are for a separate development environment.
 
 1. Copy `.env.example` to `.env`
 2. Start Postgres:
@@ -85,12 +86,6 @@ This writes local test data to `apps/api/dev-data.json`, so registration, login,
 - Time tracker shifts, breaks, and exports live in their own tracker tables.
 - Uploads use local files by default (`STORAGE_BACKEND=local`). Supabase storage requires an explicit `STORAGE_BACKEND=supabase` setting as well as credentials; leftover credentials do not switch storage providers.
 - The frontend imports shared parsing logic from `packages/shared`, so the internal tracker and any external tool can use the same `.invoice` contract.
-
-## Data on this PC
-
-Accounts, profiles, invoices, and time-tracker records use the local database.
-Logos and signatures use the Docker upload volume. This is a fresh deployment;
-previous Supabase accounts, records, and files have not been imported.
 
 ## Key docs
 
